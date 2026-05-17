@@ -53,6 +53,8 @@ SQL string
   -> 登録済みの振る舞いを返す。未登録なら fail
 ```
 
+テストメソッドからの具体的な利用パターンは [テストメソッドでの使い方](test-method-usage.md) を参照します。
+
 ルールは AST 由来の metadata で登録します。
 
 ```csharp

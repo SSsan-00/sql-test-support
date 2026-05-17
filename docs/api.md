@@ -21,6 +21,8 @@ var inspection = service.Inspect(sql);
 - `Normalize`: 正規化 SQL を生成し、fingerprint が変わらないことを検証する
 - `Inspect`: SQL を正規化し、Mock 分岐に使う AST metadata を抽出する
 
+構文検証の対象範囲は [構文検証の範囲](syntax-validation-scope.md) を参照します。テストメソッドでの使い方は [テストメソッドでの使い方](test-method-usage.md) にまとめています。
+
 ## SqlMockRouter
 
 ```csharp
