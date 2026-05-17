@@ -38,6 +38,13 @@ namespace SqlTestSupport
             return rule.GetAffectedRows(invocation);
         }
 
+        public void ExecuteCommand(string sql)
+        {
+            var invocation = CreateInvocation(DbCallMethod.Command, sql);
+            var rule = FindRule(invocation);
+            rule.Complete(invocation);
+        }
+
         public T Scalar<T>(string sql)
         {
             var invocation = CreateInvocation(DbCallMethod.Scalar, sql);

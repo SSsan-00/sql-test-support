@@ -144,6 +144,52 @@ public void Rename_customer_updates_customer()
 - Mock は affected rows として `1` を返す
 - 登録した rule が実際に呼ばれる
 
+## 戻り値なし Execute 系メソッドの例
+
+テスト対象が `void Execute(...)` のような戻り値なし実行メソッドを使う場合は `Completes` を登録し、Mock DB 側では `ExecuteCommand` に委譲します。
+
+```csharp
+public sealed class MockAppDb : AppDb
+{
+    private readonly SqlMockRouter _router = new();
+
+    public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
+        => _router.WhenSql(predicate);
+
+    public void VerifyAllSqlExpectations()
+        => _router.VerifyAll();
+
+    public override void Execute(string sql, object? parameters = null)
+        => _router.ExecuteCommand(sql);
+}
+```
+
+```csharp
+[TestMethod]
+public void Rename_customer_executes_update_command()
+{
+    var db = new MockAppDb();
+    db.WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id"))
+      .Completes();
+
+    var service = new CustomerService(db);
+
+    service.RenameCustomer(1, "Alice");
+
+    db.VerifyAllSqlExpectations();
+}
+```
+
+このテストで保証すること:
+
+- `CustomerService` が valid な T-SQL を実行する
+- SQL が `dbo.Customers` を更新対象にする `UPDATE` である
+- `WHERE` 句で `Id` を使う
+- 戻り値なし command は `Completes` が登録された場合だけ成功する
+- 登録した rule が実際に呼ばれる
+
+`ReturnsAffectedRows` は `ExecuteNonQuery` 用です。戻り値なし command に流用すると失敗します。
+
 ## 同じ分類の SQL が複数回呼ばれる場合
 
 同じ matcher に複数回一致する場合は sequence を使います。
@@ -193,7 +239,9 @@ public void Unexpected_sql_fails_the_test()
 | `Assert.NormalizeSql(sql)` | テストコード | 正規化済み SQL を取得する |
 | `SqlMockRouter.ExecuteNonQuery(sql)` | Mock DB override 内 | `Execute` 系 SQL を検証し、affected rows を返す |
 | `SqlMockRouter.Scalar<T>(sql)` | Mock DB override 内 | scalar 系 SQL を検証し、登録値を返す |
+| `SqlMockRouter.ExecuteCommand(sql)` | Mock DB override 内 | 戻り値なし SQL command を検証する |
 | `WhenSql(predicate)` | テストの Arrange | Mock の振る舞い条件を登録する |
+| `Completes()` | テストの Arrange | 戻り値なし command の成功を登録する |
 | `VerifyAll()` | テストの Assert / cleanup | 登録 rule が呼ばれたことを検証する |
 
 テスト対象メソッドがプロダクション SQL を実行する場合、テストメソッド側で毎回 `Assert.IsValidSql` を直接呼ぶ必要はありません。Mock DB の override を通せば、実行された SQL は router 内で必ず検証されます。

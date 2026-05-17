@@ -38,6 +38,13 @@ public sealed class MockAppDb : AppDb
 }
 ```
 
+戻り値なしの本番メソッドを override する場合は `ExecuteCommand` に委譲します。
+
+```csharp
+public override void Execute(string sql, object? parameters = null)
+    => _router.ExecuteCommand(sql);
+```
+
 ## 処理フロー
 
 Mock 経由の SQL 呼び出しは、必ず同じ流れを通ります。
@@ -73,6 +80,8 @@ router はデフォルトで strict に動きます。
 - 未登録 SQL は失敗する
 - `ReturnsScalar` の rule は `ExecuteNonQuery` を満たせない
 - `ReturnsAffectedRows` の rule は `Scalar<T>` を満たせない
+- `ReturnsAffectedRows` の rule は `ExecuteCommand` を満たせない
+- 戻り値なし command には `Completes` rule が必要
 - 登録済み rule が一度も呼ばれない場合、`VerifyAll()` で失敗する
 
 ## 複数回呼び出し

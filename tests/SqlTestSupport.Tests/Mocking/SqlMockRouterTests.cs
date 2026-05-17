@@ -44,6 +44,41 @@ namespace SqlTestSupport.Tests
         }
 
         [TestMethod]
+        public void ExecuteCommand_completes_for_matching_void_command()
+        {
+            // 仕様: 戻り値なし実行は Completes rule に一致した場合だけ成功する。
+            var router = new SqlMockRouter();
+            router
+                .WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id"))
+                .Completes();
+
+            router.ExecuteCommand("""
+                UPDATE dbo.Customers
+                SET Name = @Name
+                WHERE Id = @Id
+                """);
+
+            router.VerifyAll();
+        }
+
+        [TestMethod]
+        public void ExecuteCommand_rejects_rule_that_returns_affected_rows()
+        {
+            // 仕様: void 実行には Completes rule を明示し、affected rows rule は流用しない。
+            var router = new SqlMockRouter();
+            router
+                .WhenSql(q => q.IsUpdate("dbo.Customers"))
+                .ReturnsAffectedRows(1);
+
+            Assert.Throws<AssertFailedException>(() =>
+                router.ExecuteCommand("""
+                    UPDATE dbo.Customers
+                    SET Name = @Name
+                    WHERE Id = @Id
+                    """));
+        }
+
+        [TestMethod]
         public void Router_rejects_unregistered_sql()
         {
             // 仕様: strict mode。valid でも未登録 SQL は失敗する。

@@ -32,5 +32,11 @@ namespace SqlTestSupport
             _rule.SetScalarSequence(values);
             return this;
         }
+
+        public SqlMockSetup Completes()
+        {
+            _rule.SetCompletes();
+            return this;
+        }
     }
 }

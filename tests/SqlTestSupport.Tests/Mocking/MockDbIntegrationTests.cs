@@ -25,6 +25,22 @@ namespace SqlTestSupport.Tests
             db.VerifyAllSqlExpectations();
         }
 
+        [TestMethod]
+        public void Mock_db_can_override_void_sql_argument_method()
+        {
+            // 仕様: 戻り値なし本番メソッドも第一引数 SQL を router に渡して検証できる。
+            var db = new MockVoidProductionDb();
+            db.WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id")).Completes();
+
+            db.Execute("""
+                UPDATE dbo.Customers
+                SET Name = @Name
+                WHERE Id = @Id
+                """);
+
+            db.VerifyAllSqlExpectations();
+        }
+
         private class ProductionDb
         {
             // 導入先の本番DBクラスを最小化した形。
@@ -51,6 +67,26 @@ namespace SqlTestSupport.Tests
 
             public override T Scalar<T>(string sql, object? parameters = null)
                 => _router.Scalar<T>(sql);
+        }
+
+        private class VoidProductionDb
+        {
+            public virtual void Execute(string sql, object? parameters = null)
+                => throw new NotSupportedException(sql);
+        }
+
+        private sealed class MockVoidProductionDb : VoidProductionDb
+        {
+            private readonly SqlMockRouter _router = new();
+
+            public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
+                => _router.WhenSql(predicate);
+
+            public void VerifyAllSqlExpectations()
+                => _router.VerifyAll();
+
+            public override void Execute(string sql, object? parameters = null)
+                => _router.ExecuteCommand(sql);
         }
     }
 }

@@ -32,6 +32,12 @@ router.WhenSql(q => q.IsSelectFrom("dbo.Customers"))
       .ReturnsScalar("Alice");
 
 var name = router.Scalar<string>("SELECT Name FROM dbo.Customers");
+
+router.WhenSql(q => q.IsUpdate("dbo.Customers"))
+      .Completes();
+
+router.ExecuteCommand("UPDATE dbo.Customers SET Name = @Name WHERE Id = @Id");
+
 router.VerifyAll();
 ```
 
@@ -42,6 +48,7 @@ ReturnsScalar(object? value)
 ReturnsScalarSequence(params object?[] values)
 ReturnsAffectedRows(int affectedRows)
 ReturnsAffectedRowsSequence(params int[] affectedRows)
+Completes()
 ```
 
 実行メソッド:
@@ -49,6 +56,7 @@ ReturnsAffectedRowsSequence(params int[] affectedRows)
 ```csharp
 ExecuteNonQuery(string sql)
 Scalar<T>(string sql)
+ExecuteCommand(string sql)
 ```
 
 ## SqlInvocation

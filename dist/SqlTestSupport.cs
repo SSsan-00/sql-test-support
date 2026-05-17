@@ -237,6 +237,13 @@ namespace SqlTestSupport
             return rule.GetAffectedRows(invocation);
         }
 
+        public void ExecuteCommand(string sql)
+        {
+            var invocation = CreateInvocation(DbCallMethod.Command, sql);
+            var rule = FindRule(invocation);
+            rule.Complete(invocation);
+        }
+
         public T Scalar<T>(string sql)
         {
             var invocation = CreateInvocation(DbCallMethod.Scalar, sql);
@@ -356,7 +363,8 @@ namespace SqlTestSupport
     {
         None = 0,
         AffectedRows,
-        Scalar
+        Scalar,
+        Complete
     }
 
     internal sealed class SqlMockRule
@@ -406,6 +414,14 @@ namespace SqlTestSupport
             SetSequence(values);
         }
 
+        public void SetCompletes()
+        {
+            ReturnKind = SqlMockReturnKind.Complete;
+            _isSequence = false;
+            _singleReturn = null;
+            _returns.Clear();
+        }
+
         public int GetAffectedRows(SqlInvocation invocation)
         {
             if (ReturnKind != SqlMockReturnKind.AffectedRows)
@@ -430,6 +446,16 @@ namespace SqlTestSupport
             }
 
             return NextReturn(invocation);
+        }
+
+        public void Complete(SqlInvocation invocation)
+        {
+            if (ReturnKind != SqlMockReturnKind.Complete)
+            {
+                throw new AssertFailedException("Matched SQL rule is not configured to complete a void command.");
+            }
+
+            CallCount++;
         }
 
         private void SetSequence(IEnumerable<object?> values)
@@ -509,6 +535,12 @@ namespace SqlTestSupport
             _rule.SetScalarSequence(values);
             return this;
         }
+
+        public SqlMockSetup Completes()
+        {
+            _rule.SetCompletes();
+            return this;
+        }
     }
 }
 
@@ -520,7 +552,8 @@ namespace SqlTestSupport
     public enum DbCallMethod
     {
         ExecuteNonQuery = 0,
-        Scalar
+        Scalar,
+        Command
     }
 }
 
