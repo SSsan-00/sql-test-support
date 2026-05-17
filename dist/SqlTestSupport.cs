@@ -204,19 +204,28 @@ namespace SqlTestSupport
     public sealed class SqlMockRouter
     {
         private readonly SqlValidationService _validationService;
+        private readonly UnmatchedSqlBehavior _unmatchedSqlBehavior;
         private readonly List<SqlMockRule> _rules = new();
         private readonly List<SqlInvocation> _history = new();
         private readonly Dictionary<DbCallMethod, int> _methodCallCounts = new();
         private int _globalCallCount;
 
         public SqlMockRouter()
-            : this(new SqlValidationService())
+            : this(UnmatchedSqlBehavior.Strict)
         {
         }
 
-        public SqlMockRouter(SqlValidationService validationService)
+        public SqlMockRouter(UnmatchedSqlBehavior unmatchedSqlBehavior)
+            : this(new SqlValidationService(), unmatchedSqlBehavior)
+        {
+        }
+
+        public SqlMockRouter(
+            SqlValidationService validationService,
+            UnmatchedSqlBehavior unmatchedSqlBehavior = UnmatchedSqlBehavior.Strict)
         {
             _validationService = validationService;
+            _unmatchedSqlBehavior = unmatchedSqlBehavior;
         }
 
         public IReadOnlyList<SqlInvocation> History => _history;
@@ -240,7 +249,18 @@ namespace SqlTestSupport
         public void ExecuteCommand(string sql)
         {
             var invocation = CreateInvocation(DbCallMethod.Command, sql);
-            var rule = FindRule(invocation);
+            var rule = FindRuleOrDefault(invocation);
+
+            if (rule is null)
+            {
+                if (_unmatchedSqlBehavior == UnmatchedSqlBehavior.ValidateOnlyForCommands)
+                {
+                    return;
+                }
+
+                throw UnexpectedSql(invocation);
+            }
+
             rule.Complete(invocation);
         }
 
@@ -320,6 +340,9 @@ namespace SqlTestSupport
         }
 
         private SqlMockRule FindRule(SqlInvocation invocation)
+            => FindRuleOrDefault(invocation) ?? throw UnexpectedSql(invocation);
+
+        private SqlMockRule? FindRuleOrDefault(SqlInvocation invocation)
         {
             foreach (var rule in _rules)
             {
@@ -329,8 +352,7 @@ namespace SqlTestSupport
                 }
             }
 
-            // strict mode。未登録 SQL はテスト失敗。
-            throw UnexpectedSql(invocation);
+            return null;
         }
 
         private AssertFailedException UnexpectedSql(SqlInvocation invocation)
@@ -693,6 +715,18 @@ namespace SqlTestSupport
 }
 
 // END Models/SqlStatementKind.cs
+
+// BEGIN Models/UnmatchedSqlBehavior.cs
+namespace SqlTestSupport
+{
+    public enum UnmatchedSqlBehavior
+    {
+        Strict = 0,
+        ValidateOnlyForCommands
+    }
+}
+
+// END Models/UnmatchedSqlBehavior.cs
 
 // BEGIN Validation/SqlAstFingerprinter.cs
 

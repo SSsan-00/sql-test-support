@@ -78,6 +78,13 @@ db.WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id"))
   .ReturnsAffectedRows(1);
 ```
 
+戻り値なし SQL 実行だけ、未登録 SQL を構文解析のみで通す mode もあります。
+
+```csharp
+var router = new SqlMockRouter(UnmatchedSqlBehavior.ValidateOnlyForCommands);
+router.ExecuteCommand("UPDATE dbo.Customers SET Name = @Name WHERE Id = @Id");
+```
+
 ## Bootstrap
 
 ```bash

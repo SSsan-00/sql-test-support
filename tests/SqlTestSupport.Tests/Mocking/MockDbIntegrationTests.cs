@@ -41,6 +41,21 @@ namespace SqlTestSupport.Tests
             db.VerifyAllSqlExpectations();
         }
 
+        [TestMethod]
+        public void Mock_db_can_validate_unregistered_void_sql_without_mock_behavior()
+        {
+            // 仕様: validate-only mode の Mock DB は未登録 void SQL を構文解析だけで通せる。
+            var db = new MockVoidProductionDb(UnmatchedSqlBehavior.ValidateOnlyForCommands);
+
+            db.Execute("""
+                UPDATE dbo.Customers
+                SET Name = @Name
+                WHERE Id = @Id
+                """);
+
+            db.VerifyAllSqlExpectations();
+        }
+
         private class ProductionDb
         {
             // 導入先の本番DBクラスを最小化した形。
@@ -77,7 +92,13 @@ namespace SqlTestSupport.Tests
 
         private sealed class MockVoidProductionDb : VoidProductionDb
         {
-            private readonly SqlMockRouter _router = new();
+            private readonly SqlMockRouter _router;
+
+            public MockVoidProductionDb(
+                UnmatchedSqlBehavior unmatchedSqlBehavior = UnmatchedSqlBehavior.Strict)
+            {
+                _router = new SqlMockRouter(unmatchedSqlBehavior);
+            }
 
             public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
                 => _router.WhenSql(predicate);

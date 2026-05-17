@@ -30,8 +30,10 @@
 - `WhenSql(...).ReturnsAffectedRows(...)` は non-query call に対応する
 - `WhenSql(...).Completes()` は void command call に対応する
 - 未登録 SQL は失敗する
+- `ValidateOnlyForCommands` では未登録 void command を構文解析だけで通す
 - invalid SQL は rule matching 前に失敗する
 - void command に affected rows rule を流用すると失敗する
+- `ValidateOnlyForCommands` でも scalar / non-query の未登録 SQL は失敗する
 - sequence return は登録順に消費される
 - 未使用 rule は `VerifyAll()` で検出される
 

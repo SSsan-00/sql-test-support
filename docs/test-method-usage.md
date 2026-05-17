@@ -190,6 +190,47 @@ public void Rename_customer_executes_update_command()
 
 `ReturnsAffectedRows` は `ExecuteNonQuery` 用です。戻り値なし command に流用すると失敗します。
 
+## 未登録の戻り値なし SQL を構文解析だけ通す
+
+テスト対象メソッドが戻り値なし SQL を多数実行し、そのうち一部だけ Mock 振る舞いを指定したい場合は `ValidateOnlyForCommands` を使います。
+
+```csharp
+public sealed class MockAppDb : AppDb
+{
+    private readonly SqlMockRouter _router =
+        new(UnmatchedSqlBehavior.ValidateOnlyForCommands);
+
+    public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
+        => _router.WhenSql(predicate);
+
+    public override void Execute(string sql, object? parameters = null)
+        => _router.ExecuteCommand(sql);
+}
+```
+
+```csharp
+[TestMethod]
+public void Save_customer_mocks_only_the_audit_command()
+{
+    var db = new MockAppDb();
+    db.WhenSql(q => q.IsInsertInto("dbo.AuditLogs"))
+      .Completes();
+
+    var service = new CustomerService(db);
+
+    service.SaveCustomer(1, "Alice");
+}
+```
+
+この mode では、`dbo.AuditLogs` 以外の戻り値なし SQL も構文解析・正規化・履歴記録までは行われます。`WhenSql` に一致しなくても失敗しません。
+
+ただし、次のメソッドでは未登録 SQL は失敗します。
+
+- `Scalar<T>`: 返す値が必要
+- `ExecuteNonQuery`: affected rows が必要
+
+戻り値が必要な SQL は、`ReturnsScalar` または `ReturnsAffectedRows` を必ず登録します。
+
 ## 同じ分類の SQL が複数回呼ばれる場合
 
 同じ matcher に複数回一致する場合は sequence を使います。
@@ -242,6 +283,7 @@ public void Unexpected_sql_fails_the_test()
 | `SqlMockRouter.ExecuteCommand(sql)` | Mock DB override 内 | 戻り値なし SQL command を検証する |
 | `WhenSql(predicate)` | テストの Arrange | Mock の振る舞い条件を登録する |
 | `Completes()` | テストの Arrange | 戻り値なし command の成功を登録する |
+| `UnmatchedSqlBehavior.ValidateOnlyForCommands` | Mock DB 初期化 | 未登録の戻り値なし command を構文解析だけで通す |
 | `VerifyAll()` | テストの Assert / cleanup | 登録 rule が呼ばれたことを検証する |
 
 テスト対象メソッドがプロダクション SQL を実行する場合、テストメソッド側で毎回 `Assert.IsValidSql` を直接呼ぶ必要はありません。Mock DB の override を通せば、実行された SQL は router 内で必ず検証されます。

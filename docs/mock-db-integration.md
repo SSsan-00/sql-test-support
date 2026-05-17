@@ -84,6 +84,30 @@ router はデフォルトで strict に動きます。
 - 戻り値なし command には `Completes` rule が必要
 - 登録済み rule が一度も呼ばれない場合、`VerifyAll()` で失敗する
 
+## 未登録 void command の validate-only mode
+
+戻り値なし実行メソッドに限り、未登録 SQL を構文解析だけで通す mode を選べます。
+
+```csharp
+public sealed class MockAppDb : AppDb
+{
+    private readonly SqlMockRouter _router =
+        new(UnmatchedSqlBehavior.ValidateOnlyForCommands);
+
+    public override void Execute(string sql, object? parameters = null)
+        => _router.ExecuteCommand(sql);
+}
+```
+
+この mode の挙動:
+
+- 未登録の `ExecuteCommand` SQL は validate / normalize / inspect / history 記録だけ行う
+- invalid SQL は失敗する
+- 登録済み `WhenSql(...).Completes()` に一致した SQL は通常通り rule 呼び出しとして扱う
+- `Scalar<T>` と `ExecuteNonQuery` の未登録 SQL は引き続き失敗する
+
+戻り値が必要なメソッドでは返す値を決められないため、登録必須のままにします。
+
 ## 複数回呼び出し
 
 同じ分類の SQL が複数回呼ばれる場合は sequence return を使います。

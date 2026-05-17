@@ -41,6 +41,15 @@ router.ExecuteCommand("UPDATE dbo.Customers SET Name = @Name WHERE Id = @Id");
 router.VerifyAll();
 ```
 
+未登録の戻り値なし command を構文解析だけで通したい場合は、router 作成時に `ValidateOnlyForCommands` を指定します。
+
+```csharp
+var router = new SqlMockRouter(UnmatchedSqlBehavior.ValidateOnlyForCommands);
+router.ExecuteCommand("UPDATE dbo.Customers SET Name = @Name WHERE Id = @Id");
+```
+
+この mode でも `Scalar<T>` と `ExecuteNonQuery` は戻り値が必要なため、未登録 SQL を許可しません。
+
 登録メソッド:
 
 ```csharp

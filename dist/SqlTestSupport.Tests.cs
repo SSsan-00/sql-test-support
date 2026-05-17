@@ -94,6 +94,21 @@ namespace SqlTestSupport.Tests
             db.VerifyAllSqlExpectations();
         }
 
+        [TestMethod]
+        public void Mock_db_can_validate_unregistered_void_sql_without_mock_behavior()
+        {
+            // 仕様: validate-only mode の Mock DB は未登録 void SQL を構文解析だけで通せる。
+            var db = new MockVoidProductionDb(UnmatchedSqlBehavior.ValidateOnlyForCommands);
+
+            db.Execute("""
+                UPDATE dbo.Customers
+                SET Name = @Name
+                WHERE Id = @Id
+                """);
+
+            db.VerifyAllSqlExpectations();
+        }
+
         private class ProductionDb
         {
             // 導入先の本番DBクラスを最小化した形。
@@ -130,7 +145,13 @@ namespace SqlTestSupport.Tests
 
         private sealed class MockVoidProductionDb : VoidProductionDb
         {
-            private readonly SqlMockRouter _router = new();
+            private readonly SqlMockRouter _router;
+
+            public MockVoidProductionDb(
+                UnmatchedSqlBehavior unmatchedSqlBehavior = UnmatchedSqlBehavior.Strict)
+            {
+                _router = new SqlMockRouter(unmatchedSqlBehavior);
+            }
 
             public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
                 => _router.WhenSql(predicate);
@@ -223,6 +244,59 @@ namespace SqlTestSupport.Tests
                     UPDATE dbo.Customers
                     SET Name = @Name
                     WHERE Id = @Id
+                    """));
+        }
+
+        [TestMethod]
+        public void ExecuteCommand_rejects_unregistered_sql_by_default()
+        {
+            // 仕様: 既定は strict。戻り値なしでも未登録 SQL は失敗する。
+            var router = new SqlMockRouter();
+
+            Assert.Throws<AssertFailedException>(() =>
+                router.ExecuteCommand("""
+                    UPDATE dbo.Customers
+                    SET Name = @Name
+                    WHERE Id = @Id
+                    """));
+        }
+
+        [TestMethod]
+        public void ExecuteCommand_validate_only_mode_accepts_unregistered_valid_sql()
+        {
+            // 仕様: validate-only mode では未登録の戻り値なし SQL を解析・履歴記録だけで通す。
+            var router = new SqlMockRouter(UnmatchedSqlBehavior.ValidateOnlyForCommands);
+
+            router.ExecuteCommand("""
+                UPDATE dbo.Customers
+                SET Name = @Name
+                WHERE Id = @Id
+                """);
+
+            Assert.HasCount(1, router.History);
+            Assert.AreEqual(DbCallMethod.Command, router.History[0].Method);
+            Assert.IsTrue(router.History[0].IsUpdate("dbo.Customers"));
+        }
+
+        [TestMethod]
+        public void ExecuteCommand_validate_only_mode_still_rejects_unregistered_invalid_sql()
+        {
+            // 仕様: validate-only mode でも SQL 構文不正は失敗する。
+            var router = new SqlMockRouter(UnmatchedSqlBehavior.ValidateOnlyForCommands);
+
+            Assert.Throws<AssertFailedException>(() => router.ExecuteCommand("SELECT FROM WHERE"));
+        }
+
+        [TestMethod]
+        public void Scalar_validate_only_mode_still_rejects_unregistered_sql()
+        {
+            // 仕様: 戻り値が必要な SQL は validate-only mode でも rule 登録必須。
+            var router = new SqlMockRouter(UnmatchedSqlBehavior.ValidateOnlyForCommands);
+
+            Assert.Throws<AssertFailedException>(() =>
+                router.Scalar<int>("""
+                    SELECT COUNT(1)
+                    FROM dbo.Customers
                     """));
         }
 
