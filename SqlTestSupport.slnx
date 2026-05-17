@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SqlTestSupport/SqlTestSupport.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SqlTestSupport.Tests/SqlTestSupport.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csproj" />
+  </Folder>
+</Solution>
