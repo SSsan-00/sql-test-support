@@ -61,6 +61,7 @@ static void Bundle(string title, string sourceRoot, string outputPath)
 
         foreach (var line in lines)
         {
+            // using と assembly attribute は単一ファイル先頭へ集約。
             if (!seenNamespace && line.StartsWith("using ", StringComparison.Ordinal))
             {
                 usings.Add(line.Trim());

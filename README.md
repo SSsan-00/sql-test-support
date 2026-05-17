@@ -1,41 +1,35 @@
 # SqlTestSupport
 
-SqlTestSupport is a .NET 9 test helper for MSTest projects that need to validate
-and normalize raw SQL Server command text during unit tests.
+SqlTestSupport は、MSTest を使う .NET 9 テストプロジェクト向けの SQL 検証・正規化・DB Mock 支援ライブラリです。
 
-The project is designed for codebases where SQL is written directly in production
-methods and a production database class is replaced by a test double through
-inheritance and method overrides.
+プロダクションコードに SQL Server 向け T-SQL がベタ書きされていて、既存の DB 実行クラスを継承・override した Mock DB で差し替える構成を想定しています。
 
-## Goals
+## 目的
 
-- Validate T-SQL syntax with Microsoft ScriptDom.
-- Target SQL Server 2022 syntax (`SqlVersion.Sql160`).
-- Normalize SQL command text only when the AST fingerprint is unchanged.
-- Extract AST-derived metadata for mock routing:
+- Microsoft ScriptDom で T-SQL 構文を検証する
+- SQL Server 2022 構文、つまり `SqlVersion.Sql160` を対象に固定する
+- AST fingerprint が変わらない場合だけ SQL を正規化する
+- Mock 分岐に使う AST 由来の情報を抽出する
   - statement kind
   - target tables
   - referenced tables
   - selected columns
   - where columns
   - parameter names
-- Provide a small `WhenSql(...).Returns...` router for DB test doubles.
-- Generate single-file bootstrap artifacts for easy adoption in existing test
-  projects.
+- DB テストダブル向けに `WhenSql(...).Returns...` 形式のルーターを提供する
+- 既存テストプロジェクトへ導入しやすいように、bootstrap で単一ファイル成果物を生成する
 
-## Non-goals
+## 対象外
 
-- It does not connect to SQL Server.
-- It does not validate table existence, column existence, permissions, or type
-  compatibility.
-- It does not fully resolve aliases against database metadata.
-- It does not support `GO` batch separators for command-text execution.
-- It does not require async APIs; parsing and normalization are in-memory CPU
-  work.
+- SQL Server へ接続しない
+- テーブル存在、カラム存在、権限、型互換性は検証しない
+- DB メタデータを使った alias 完全解決は行わない
+- command text として実行しづらい `GO` バッチ区切りは扱わない
+- async API は提供しない。parse、正規化、fingerprint はメモリ内の同期処理
 
-## Public API
+## 公開 API
 
-The intended integration into an existing custom Assert class is two methods:
+既存の独自 `Assert` クラスへ、次の 2 メソッドだけを追加する想定です。
 
 ```csharp
 public static void IsValidSql(string sql, string? message = null)
@@ -45,14 +39,14 @@ public static string NormalizeSql(string sql, string? message = null)
     => SqlAssertFacade.NormalizeSql(sql, message);
 ```
 
-Test code can then use:
+テストコード側では次の形で使います。
 
 ```csharp
 Assert.IsValidSql(sql);
 var normalized = Assert.NormalizeSql(sql);
 ```
 
-The mock router can be used from a DB test double:
+Mock DB では `SqlMockRouter` を持たせ、第一引数の SQL だけを渡します。
 
 ```csharp
 public sealed class MockAppDb : AppDb
@@ -73,7 +67,7 @@ public sealed class MockAppDb : AppDb
 }
 ```
 
-Mock behavior is configured against inspected SQL:
+Mock の振る舞いは、解析済み SQL に対する条件で登録します。
 
 ```csharp
 db.WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.WhereUses("Id"))
@@ -85,30 +79,26 @@ db.WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id"))
 
 ## Bootstrap
 
-Run:
-
 ```bash
 ./bootstrap/bootstrap.sh
 ```
 
-or:
+または:
 
 ```bash
 dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csproj
 ```
 
-This generates:
+生成物:
 
 ```text
 dist/SqlTestSupport.cs
 dist/SqlTestSupport.Tests.cs
 ```
 
-`SqlTestSupport.cs` is the runtime helper bundle. `SqlTestSupport.Tests.cs`
-contains the MSTest coverage bundle that can be copied into an adopting project
-when desired.
+`SqlTestSupport.cs` は導入先で利用する本体ファイルです。`SqlTestSupport.Tests.cs` は、導入先でも同じ仕様を検証したい場合に使う MSTest の単一ファイルです。
 
-## Development
+## 開発
 
 ```bash
 dotnet restore
@@ -116,10 +106,10 @@ dotnet test
 dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csproj
 ```
 
-## Documentation
+## ドキュメント
 
-- [Architecture](docs/architecture.md)
-- [API reference](docs/api.md)
-- [Mock DB integration](docs/mock-db-integration.md)
-- [Bootstrap design](docs/bootstrap.md)
-- [Testing strategy](docs/testing.md)
+- [アーキテクチャ](docs/architecture.md)
+- [API リファレンス](docs/api.md)
+- [Mock DB 連携](docs/mock-db-integration.md)
+- [Bootstrap 設計](docs/bootstrap.md)
+- [テスト方針](docs/testing.md)

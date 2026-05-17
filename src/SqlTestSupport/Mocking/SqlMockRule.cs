@@ -105,6 +105,7 @@ namespace SqlTestSupport
 
             if (_returns.Count == 0)
             {
+                // sequence は期待回数も表す。余分な呼び出しは失敗。
                 throw new AssertFailedException($"""
                     SQL mock sequence was exhausted.
 

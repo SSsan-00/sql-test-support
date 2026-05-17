@@ -1,47 +1,43 @@
-# Testing Strategy
+# テスト方針
 
-The tests cover both the SQL analysis pipeline and the mock DB behavior.
+テストは SQL 解析 pipeline と Mock DB の振る舞いを両方検証します。テスト名とコメントを読めば、どの仕様を保証しているか分かる形にします。
 
-## Validation tests
+## 検証系テスト
 
-These verify that:
+保証する内容:
 
-- valid SQL Server 2022 T-SQL parses successfully
-- invalid T-SQL throws a syntax validation exception
-- normalization returns SQL only when fingerprints match
-- inspection extracts tables, columns, statement kind, and parameters
+- SQL Server 2022 の valid T-SQL は parse できる
+- invalid T-SQL は syntax validation exception になる
+- normalization は fingerprint が一致する場合だけ SQL を返す
+- inspection は table、column、statement kind、parameter を抽出する
 
-## Assert facade tests
+## Assert facade テスト
 
-These verify that:
+保証する内容:
 
-- valid SQL passes through the facade
-- invalid SQL is converted into `AssertFailedException`
-- custom user messages are preserved in assertion failure output
-- normalized SQL can be returned for callers that want to execute normalized
-  command text
+- valid SQL は facade を通過する
+- invalid SQL は `AssertFailedException` へ変換される
+- 呼び出し側の custom message は failure output に残る
+- 正規化済み SQL を呼び出し側へ返せる
 
-## Mock router tests
+## Mock router テスト
 
-These verify that:
+保証する内容:
 
-- `WhenSql(...).ReturnsScalar(...)` works for scalar calls
-- `WhenSql(...).ReturnsAffectedRows(...)` works for non-query calls
-- unregistered SQL fails
-- invalid SQL fails before rule matching
-- sequence returns are consumed in order
-- `VerifyAll()` fails for unused rules
+- `WhenSql(...).ReturnsScalar(...)` は scalar call に対応する
+- `WhenSql(...).ReturnsAffectedRows(...)` は non-query call に対応する
+- 未登録 SQL は失敗する
+- invalid SQL は rule matching 前に失敗する
+- sequence return は登録順に消費される
+- 未使用 rule は `VerifyAll()` で検出される
 
-## Mock DB integration test
+## Mock DB 統合テスト
 
-The integration test defines a minimal production-like base DB class with virtual
-methods:
+integration test では、本番 DB クラスに近い最小 base class を定義します。
 
 ```csharp
 public virtual int Execute(string sql, object? parameters = null)
 public virtual T Scalar<T>(string sql, object? parameters = null)
 ```
 
-The mock subclass overrides those methods and delegates to `SqlMockRouter`. This
-keeps the test representative of the intended adoption path without requiring a
-real database.
+Mock subclass はこの 2 メソッドだけを override し、`SqlMockRouter` に委譲します。実 DB は不要で、導入時の使い方に近い形を検証します。

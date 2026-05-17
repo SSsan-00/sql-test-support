@@ -1,24 +1,23 @@
-# Mock DB Integration
+# Mock DB 連携
 
-The intended production shape is a concrete DB class with virtual execution
-methods whose first argument is SQL command text.
+想定する本番 DB クラスは、第一引数に SQL command text を受け取る virtual な実行メソッドを持つ形です。
 
 ```csharp
 public class AppDb
 {
     public virtual int Execute(string sql, object? parameters = null)
     {
-        // Production execution.
+        // 本番DB実行
     }
 
     public virtual T Scalar<T>(string sql, object? parameters = null)
     {
-        // Production execution.
+        // 本番DB実行
     }
 }
 ```
 
-The test double overrides only the execution boundary:
+テストダブルでは実行境界だけを override します。
 
 ```csharp
 public sealed class MockAppDb : AppDb
@@ -39,22 +38,22 @@ public sealed class MockAppDb : AppDb
 }
 ```
 
-## Flow
+## 処理フロー
 
-Every SQL call through the mock does the same work:
+Mock 経由の SQL 呼び出しは、必ず同じ流れを通ります。
 
 ```text
 SQL string
   -> validate
   -> normalize
-  -> verify AST fingerprint stability
-  -> inspect AST metadata
-  -> record invocation history
-  -> evaluate WhenSql rules
-  -> return registered behavior or fail
+  -> AST fingerprint stability を検証
+  -> AST metadata を抽出
+  -> invocation history に記録
+  -> WhenSql ルールを評価
+  -> 登録済みの振る舞いを返す。未登録なら fail
 ```
 
-Rules are configured with AST-derived metadata:
+ルールは AST 由来の metadata で登録します。
 
 ```csharp
 db.WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.WhereUses("Id"))
@@ -64,31 +63,30 @@ db.WhenSql(q => q.IsUpdate("dbo.Customers"))
   .ReturnsAffectedRows(1);
 ```
 
-## Strict behavior
+## Strict 動作
 
-The router is strict by default:
+router はデフォルトで strict に動きます。
 
-- invalid SQL fails before matching
-- unregistered SQL fails
-- a rule configured with `ReturnsScalar` cannot satisfy `ExecuteNonQuery`
-- a rule configured with `ReturnsAffectedRows` cannot satisfy `Scalar<T>`
-- `VerifyAll()` fails if a registered rule was never called
+- invalid SQL は matching 前に失敗する
+- 未登録 SQL は失敗する
+- `ReturnsScalar` の rule は `ExecuteNonQuery` を満たせない
+- `ReturnsAffectedRows` の rule は `Scalar<T>` を満たせない
+- 登録済み rule が一度も呼ばれない場合、`VerifyAll()` で失敗する
 
-## Repeated calls
+## 複数回呼び出し
 
-For repeated calls, use sequence returns:
+同じ分類の SQL が複数回呼ばれる場合は sequence return を使います。
 
 ```csharp
 db.WhenSql(q => q.IsSelectFrom("dbo.Customers"))
   .ReturnsScalarSequence("Alice", "Bob");
 ```
 
-The first matching call returns `Alice`, the second returns `Bob`, and additional
-calls fail after the sequence is exhausted.
+1 回目は `Alice`、2 回目は `Bob` を返します。sequence を使い切った後の追加呼び出しは失敗します。
 
-## Matching guidance
+## Matching 指針
 
-Prefer these matchers:
+まず次の matcher を使います。
 
 ```csharp
 q.IsSelectFrom("dbo.Customers")
@@ -102,5 +100,4 @@ q.TargetsTable("dbo.Customers")
 q.HasParameter("@Id")
 ```
 
-`NormalizedSql.Contains(...)` can still be used as an escape hatch, but AST
-metadata should be the default matching surface.
+`NormalizedSql.Contains(...)` も escape hatch として使えます。ただし標準の分岐面は AST metadata に寄せます。

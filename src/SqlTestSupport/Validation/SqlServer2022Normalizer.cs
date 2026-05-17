@@ -18,6 +18,7 @@ namespace SqlTestSupport
             var normalizedSql = Generate(original.Fragment);
             var normalized = _analyzer.Analyze(normalizedSql);
 
+            // 正規化は fail-closed。AST 構造が変わる疑いがあれば返さない。
             if (!StringComparer.Ordinal.Equals(original.Fingerprint, normalized.Fingerprint))
             {
                 throw new SqlNormalizationChangedAstException(

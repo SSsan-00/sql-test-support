@@ -156,6 +156,7 @@ namespace SqlTestSupport
             {
                 node.FromClause?.Accept(this);
 
+                // SELECT 句と WHERE 句だけ列用途を分けて収集。
                 WithColumnContext(ColumnContext.Selected, () =>
                 {
                     foreach (var selectElement in node.SelectElements)
@@ -243,6 +244,7 @@ namespace SqlTestSupport
 
             private void AddTargetTable(TableReference? tableReference)
             {
+                // 初期版は NamedTableReference のみ対象。派生 table source は参照側で扱う。
                 if (tableReference is NamedTableReference namedTableReference)
                 {
                     AddTableName(TargetTablesInternal, namedTableReference.SchemaObject);

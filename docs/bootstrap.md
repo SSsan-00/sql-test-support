@@ -1,19 +1,17 @@
-# Bootstrap Design
+# Bootstrap 設計
 
-Development code is split into many files to keep responsibilities clear and to
-make TDD practical. Existing test projects may prefer one file to adopt and
-review. The bootstrap tool supports that adoption path.
+開発時は TDD と保守性を優先して複数ファイルに分けます。一方、既存テストプロジェクトへ導入する時は、レビューしやすい単一ファイルを好む場合があります。bootstrap ツールはその導入経路を支えるものです。
 
-## Generated files
+## 生成ファイル
 
-Running the bootstrap tool creates:
+bootstrap を実行すると次を生成します。
 
 ```text
 dist/SqlTestSupport.cs
 dist/SqlTestSupport.Tests.cs
 ```
 
-`SqlTestSupport.cs` includes runtime helpers:
+`SqlTestSupport.cs` に含まれるもの:
 
 - assert facade
 - validation service
@@ -25,49 +23,46 @@ dist/SqlTestSupport.Tests.cs
 - models
 - exceptions
 
-`SqlTestSupport.Tests.cs` includes MSTest coverage for the runtime helpers and a
-minimal mock DB integration example.
+`SqlTestSupport.Tests.cs` には、本体ヘルパーと最小 Mock DB 統合例を検証する MSTest をまとめます。
 
-## Command
+## 実行方法
 
 ```bash
 dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csproj
 ```
 
-or:
+または:
 
 ```bash
 ./bootstrap/bootstrap.sh
 ```
 
-## Bundling rules
+## Bundle ルール
 
-The bootstrap tool:
+bootstrap ツールは次のルールでファイルをまとめます。
 
-- scans `src/SqlTestSupport/**/*.cs`
-- scans `tests/SqlTestSupport.Tests/**/*.cs`
-- excludes `MSTestSettings.cs` to avoid duplicate assembly-level settings in
-  adopting projects
-- collects top-level `using` directives
-- removes duplicate `using` directives
-- preserves namespace blocks and type definitions
-- emits `#nullable enable`
-- writes generated files with UTF-8 without BOM
+- `src/SqlTestSupport/**/*.cs` を対象にする
+- `tests/SqlTestSupport.Tests/**/*.cs` を対象にする
+- 導入先プロジェクトの assembly 設定と衝突しないよう `MSTestSettings.cs` は除外する
+- top-level `using` を集約する
+- 重複 `using` を除外する
+- namespace block と型定義は保持する
+- `#nullable enable` を出力する
+- UTF-8 without BOM で生成する
 
-The generated files are artifacts. Development should continue in the split
-source files.
+生成ファイルは成果物です。開発は分割された source files 側で続けます。
 
-## Adopting project checklist
+## 導入チェックリスト
 
-1. Add `dist/SqlTestSupport.cs` to the test project.
-2. Add package references:
+1. `dist/SqlTestSupport.cs` を導入先のテストプロジェクトへ追加する
+2. package reference を追加する
 
    ```xml
    <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="180.18.1" />
    <PackageReference Include="MSTest.TestFramework" Version="4.0.2" />
    ```
 
-3. Add the two forwarding methods to the existing custom Assert class:
+3. 既存の独自 `Assert` クラスへ forwarding method を 2 つ追加する
 
    ```csharp
    public static void IsValidSql(string sql, string? message = null)
@@ -77,4 +72,4 @@ source files.
        => SqlAssertFacade.NormalizeSql(sql, message);
    ```
 
-4. Optionally add `dist/SqlTestSupport.Tests.cs` to validate the adoption.
+4. 導入先で同じ仕様を検証したい場合は `dist/SqlTestSupport.Tests.cs` も追加する

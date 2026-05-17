@@ -10,6 +10,7 @@ namespace SqlTestSupport
 {
     public sealed class SqlAstFingerprinter
     {
+        // 位置情報と token stream は整形差分で変わるため fingerprint から除外。
         private static readonly HashSet<string> ExcludedProperties = new(StringComparer.Ordinal)
         {
             nameof(TSqlFragment.StartLine),
@@ -70,6 +71,7 @@ namespace SqlTestSupport
 
             if (value is TSqlParserToken)
             {
+                // コメント・空白・元 token への依存を避ける。
                 builder.Append("<token>");
                 return;
             }

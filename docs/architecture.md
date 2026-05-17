@@ -1,77 +1,74 @@
-# Architecture
+# アーキテクチャ
 
-The repository keeps development code split by responsibility, then uses the
-bootstrap tool to emit single-file artifacts for adoption.
+開発時は責務ごとにファイルを分け、導入時は bootstrap ツールで単一ファイルにまとめる構成です。
 
-## Runtime components
+## ランタイム構成
 
 ```text
 SqlAssertFacade
-  Converts SQL validation errors into MSTest AssertFailedException.
+  SQL 検証エラーを MSTest の AssertFailedException へ変換する。
 
 SqlValidationService
-  Coordinates Analyze, Normalize, and Inspect operations.
+  Analyze、Normalize、Inspect の処理順を調停する。
 
 SqlServer2022SyntaxAnalyzer
-  Parses SQL with ScriptDom using SQL Server 2022 syntax.
+  ScriptDom を使って SQL Server 2022 構文として parse する。
 
 SqlServer2022Normalizer
-  Generates normalized SQL and verifies AST fingerprint stability.
+  正規化 SQL を生成し、AST fingerprint が変わらないことを検証する。
 
 SqlAstFingerprinter
-  Creates a structural hash from the ScriptDom AST.
+  ScriptDom AST から構造 hash を生成する。
 
 SqlInspectionService
-  Extracts mock-routing metadata from the AST.
+  Mock 分岐用のメタデータを AST から抽出する。
 
 SqlMockRouter
-  Evaluates WhenSql rules and returns registered mock behavior.
+  WhenSql ルールを評価し、登録済みの Mock 戻り値を返す。
 ```
 
-## Normalization contract
+## 正規化の契約
 
-Normalization is fail-closed.
+正規化は fail-closed です。
 
 ```text
 original SQL
-  -> parse as Sql160
+  -> Sql160 として parse
   -> original AST fingerprint
-  -> generate normalized SQL
-  -> parse normalized SQL as Sql160
+  -> normalized SQL を生成
+  -> normalized SQL を Sql160 として再 parse
   -> normalized AST fingerprint
-  -> compare fingerprints
-  -> return normalized SQL only when fingerprints match
+  -> fingerprint 比較
+  -> 一致した場合だけ normalized SQL を返す
 ```
 
-If the fingerprints differ, the normalizer throws
-`SqlNormalizationChangedAstException` and does not return the generated SQL.
+fingerprint が一致しない場合は `SqlNormalizationChangedAstException` を投げ、生成済み SQL は返しません。
 
-## Fingerprint scope
+## Fingerprint の対象
 
-Included:
+含める情報:
 
-- AST node types
-- public semantic properties
-- enum values
-- string, numeric, and boolean values
-- child node order
-- identifier values and quote metadata exposed by ScriptDom
-- literal values and expression structure
+- AST ノード型
+- public な意味的プロパティ
+- enum 値
+- 文字列、数値、boolean 値
+- 子ノードの順序
+- ScriptDom が公開する識別子値と quote 情報
+- literal 値と式構造
 
-Excluded:
+除外する情報:
 
-- line and column numbers
-- offsets and token indexes
+- 行番号、列番号
+- offset、token index
 - token stream
-- whitespace
-- comments
+- 空白
+- コメント
 
-The fingerprint is a structural guard for normalization. It is not a database
-semantic proof. It does not validate metadata, permissions, or runtime behavior.
+fingerprint は正規化で AST 構造が変わっていないことを検出するための構造ガードです。DB メタデータ上の意味、権限、実行時挙動までは証明しません。
 
-## SQL dialect
+## SQL 方言
 
-The helper targets:
+対象は次で固定します。
 
 ```text
 SQL Server 2022
@@ -80,12 +77,11 @@ SqlEngineType.Standalone
 QUOTED_IDENTIFIER ON
 ```
 
-`GO` batch separators are rejected because SQL command-text APIs generally do
-not accept `GO`.
+`GO` は SQL Server Management Studio などのクライアント側バッチ区切りであり、通常の command text API では扱いづらいため拒否します。
 
-## Inspection metadata
+## Inspection metadata の扱い
 
-`SqlInspectionResult` and `SqlInvocation` expose:
+`SqlInspectionResult` と `SqlInvocation` は次を公開します。
 
 - `StatementKind`
 - `TargetTables`
@@ -96,6 +92,4 @@ not accept `GO`.
 - `NormalizedSql`
 - `Fingerprint`
 
-Alias resolution is intentionally shallow. For example, `c.Name` is kept as
-`c.Name`; the helper does not connect to the database to resolve `c` to
-`dbo.Customers`.
+alias 解決は浅く扱います。たとえば `c.Name` は `c.Name` のまま保持し、`c` が `dbo.Customers` であることを DB 接続なしに解決しません。

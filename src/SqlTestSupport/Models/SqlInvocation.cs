@@ -42,6 +42,7 @@ namespace SqlTestSupport
             => ContainsIdentifier(ParameterNames, parameterName);
 
         private static bool ContainsIdentifier(IReadOnlySet<string> values, string expected)
+            // schema 付き・schema なしの両方を軽く許容。
             => values.Any(value =>
                 StringComparer.OrdinalIgnoreCase.Equals(value, expected) ||
                 StringComparer.OrdinalIgnoreCase.Equals(LastPart(value), expected) ||

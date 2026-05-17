@@ -82,6 +82,7 @@ namespace SqlTestSupport
             SqlInspectionResult inspection;
             try
             {
+                // すべての Mock 実行 SQL は rule matching 前に検証・正規化。
                 inspection = _validationService.Inspect(sql);
             }
             catch (SqlValidationException exception)
@@ -122,6 +123,7 @@ namespace SqlTestSupport
                 }
             }
 
+            // strict mode。未登録 SQL はテスト失敗。
             throw UnexpectedSql(invocation);
         }
 

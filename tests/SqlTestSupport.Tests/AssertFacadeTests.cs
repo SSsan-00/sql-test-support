@@ -8,6 +8,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void IsValidSql_does_not_throw_for_valid_sql()
         {
+            // 仕様: Assert facade は valid SQL を失敗扱いにしない。
             SqlAssertFacade.IsValidSql("""
                 SELECT Id
                 FROM dbo.Customers
@@ -17,6 +18,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void IsValidSql_throws_assert_failed_for_invalid_sql()
         {
+            // 仕様: test-facing API は低レベル例外を AssertFailedException に変換する。
             var exception = Assert.Throws<AssertFailedException>(() =>
                 SqlAssertFacade.IsValidSql("SELECT FROM WHERE", "Custom SQL failed."));
 
@@ -27,6 +29,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void NormalizeSql_returns_normalized_sql()
         {
+            // 仕様: 呼び出し側は正規化済み SQL を string として受け取れる。
             var normalized = SqlAssertFacade.NormalizeSql("""
                 select Id
                 from dbo.Customers

@@ -8,6 +8,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Scalar_returns_registered_value_for_matching_select()
         {
+            // 仕様: SELECT 形状に一致した rule は scalar 戻り値を返す。
             var router = new SqlMockRouter();
             router
                 .WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.WhereUses("Id"))
@@ -26,6 +27,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void ExecuteNonQuery_returns_registered_affected_rows_for_matching_update()
         {
+            // 仕様: UPDATE 形状に一致した rule は affected rows を返す。
             var router = new SqlMockRouter();
             router
                 .WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id"))
@@ -44,6 +46,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Router_rejects_unregistered_sql()
         {
+            // 仕様: strict mode。valid でも未登録 SQL は失敗する。
             var router = new SqlMockRouter();
 
             Assert.Throws<AssertFailedException>(() =>
@@ -56,6 +59,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Router_rejects_invalid_sql_before_matching()
         {
+            // 仕様: rule matching より先に SQL 構文検証を強制する。
             var router = new SqlMockRouter();
             router.WhenSql(_ => true).ReturnsScalar(1);
 
@@ -66,6 +70,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Scalar_sequence_returns_values_in_order()
         {
+            // 仕様: sequence は同じ rule への呼び出し順に消費される。
             var router = new SqlMockRouter();
             router
                 .WhenSql(q => q.IsSelectFrom("dbo.Customers"))
@@ -81,6 +86,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void VerifyAll_fails_when_rule_was_not_called()
         {
+            // 仕様: 登録した rule が未使用なら VerifyAll で検出する。
             var router = new SqlMockRouter();
             router.WhenSql(q => q.IsSelectFrom("dbo.Customers")).ReturnsScalar("Alice");
 

@@ -8,6 +8,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Mock_db_can_override_first_sql_argument_methods()
         {
+            // 仕様: 本番DBクラスの第一引数 SQL 実行メソッドだけを override すれば Mock 化できる。
             var db = new MockProductionDb();
             db.WhenSql(q => q.IsSelectFrom("dbo.Customers")).ReturnsScalar("Alice");
             db.WhenSql(q => q.IsUpdate("dbo.Customers")).ReturnsAffectedRows(1);
@@ -26,6 +27,7 @@ namespace SqlTestSupport.Tests
 
         private class ProductionDb
         {
+            // 導入先の本番DBクラスを最小化した形。
             public virtual int Execute(string sql, object? parameters = null)
                 => throw new NotSupportedException(sql);
 
@@ -37,6 +39,7 @@ namespace SqlTestSupport.Tests
         {
             private readonly SqlMockRouter _router = new();
 
+            // Mock DB は router の薄い facade に留める。
             public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
                 => _router.WhenSql(predicate);
 

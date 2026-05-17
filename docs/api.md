@@ -1,4 +1,4 @@
-# API Reference
+# API リファレンス
 
 ## SqlAssertFacade
 
@@ -7,8 +7,7 @@ SqlAssertFacade.IsValidSql(sql);
 var normalized = SqlAssertFacade.NormalizeSql(sql);
 ```
 
-Use this facade from an existing custom Assert class. It converts validation
-failures into MSTest `AssertFailedException`.
+既存の独自 `Assert` クラスから呼ぶ facade です。検証失敗時は MSTest の `AssertFailedException` に変換します。
 
 ## SqlValidationService
 
@@ -18,9 +17,9 @@ var normalization = service.Normalize(sql);
 var inspection = service.Inspect(sql);
 ```
 
-- `Analyze` parses SQL and returns an AST fingerprint.
-- `Normalize` generates normalized SQL and verifies fingerprint stability.
-- `Inspect` normalizes SQL and extracts AST metadata for mock routing.
+- `Analyze`: SQL を parse し、AST fingerprint を返す
+- `Normalize`: 正規化 SQL を生成し、fingerprint が変わらないことを検証する
+- `Inspect`: SQL を正規化し、Mock 分岐に使う AST metadata を抽出する
 
 ## SqlMockRouter
 
@@ -34,7 +33,7 @@ var name = router.Scalar<string>("SELECT Name FROM dbo.Customers");
 router.VerifyAll();
 ```
 
-Available setup methods:
+登録メソッド:
 
 ```csharp
 ReturnsScalar(object? value)
@@ -43,7 +42,7 @@ ReturnsAffectedRows(int affectedRows)
 ReturnsAffectedRowsSequence(params int[] affectedRows)
 ```
 
-Available execution methods:
+実行メソッド:
 
 ```csharp
 ExecuteNonQuery(string sql)
@@ -52,9 +51,9 @@ Scalar<T>(string sql)
 
 ## SqlInvocation
 
-`SqlInvocation` is the object passed to `WhenSql` predicates.
+`SqlInvocation` は `WhenSql` の predicate に渡される解析済み SQL 情報です。
 
-Matcher helpers:
+matcher helper:
 
 ```csharp
 IsSelectFrom(table)
@@ -68,7 +67,7 @@ TargetsTable(table)
 HasParameter(parameterName)
 ```
 
-Raw properties:
+主なプロパティ:
 
 ```csharp
 OriginalSql

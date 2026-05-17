@@ -281,6 +281,7 @@ namespace SqlTestSupport
             SqlInspectionResult inspection;
             try
             {
+                // すべての Mock 実行 SQL は rule matching 前に検証・正規化。
                 inspection = _validationService.Inspect(sql);
             }
             catch (SqlValidationException exception)
@@ -321,6 +322,7 @@ namespace SqlTestSupport
                 }
             }
 
+            // strict mode。未登録 SQL はテスト失敗。
             throw UnexpectedSql(invocation);
         }
 
@@ -453,6 +455,7 @@ namespace SqlTestSupport
 
             if (_returns.Count == 0)
             {
+                // sequence は期待回数も表す。余分な呼び出しは失敗。
                 throw new AssertFailedException($"""
                     SQL mock sequence was exhausted.
 
@@ -597,6 +600,7 @@ namespace SqlTestSupport
             => ContainsIdentifier(ParameterNames, parameterName);
 
         private static bool ContainsIdentifier(IReadOnlySet<string> values, string expected)
+            // schema 付き・schema なしの両方を軽く許容。
             => values.Any(value =>
                 StringComparer.OrdinalIgnoreCase.Equals(value, expected) ||
                 StringComparer.OrdinalIgnoreCase.Equals(LastPart(value), expected) ||
@@ -663,6 +667,7 @@ namespace SqlTestSupport
 {
     public sealed class SqlAstFingerprinter
     {
+        // 位置情報と token stream は整形差分で変わるため fingerprint から除外。
         private static readonly HashSet<string> ExcludedProperties = new(StringComparer.Ordinal)
         {
             nameof(TSqlFragment.StartLine),
@@ -723,6 +728,7 @@ namespace SqlTestSupport
 
             if (value is TSqlParserToken)
             {
+                // コメント・空白・元 token への依存を避ける。
                 builder.Append("<token>");
                 return;
             }
@@ -956,6 +962,7 @@ namespace SqlTestSupport
             {
                 node.FromClause?.Accept(this);
 
+                // SELECT 句と WHERE 句だけ列用途を分けて収集。
                 WithColumnContext(ColumnContext.Selected, () =>
                 {
                     foreach (var selectElement in node.SelectElements)
@@ -1043,6 +1050,7 @@ namespace SqlTestSupport
 
             private void AddTargetTable(TableReference? tableReference)
             {
+                // 初期版は NamedTableReference のみ対象。派生 table source は参照側で扱う。
                 if (tableReference is NamedTableReference namedTableReference)
                 {
                     AddTableName(TargetTablesInternal, namedTableReference.SchemaObject);
@@ -1108,6 +1116,7 @@ namespace SqlTestSupport
             var normalizedSql = Generate(original.Fragment);
             var normalized = _analyzer.Analyze(normalizedSql);
 
+            // 正規化は fail-closed。AST 構造が変わる疑いがあれば返さない。
             if (!StringComparer.Ordinal.Equals(original.Fingerprint, normalized.Fingerprint))
             {
                 throw new SqlNormalizationChangedAstException(
@@ -1173,6 +1182,7 @@ namespace SqlTestSupport
                 throw new SqlUnsupportedScriptException(sql ?? string.Empty, "SQL text must not be empty.");
             }
 
+            // SQL Server 2022 固定。QUOTED_IDENTIFIER は ON 相当。
             var parser = new TSql160Parser(initialQuotedIdentifiers: true);
             using var reader = new StringReader(sql);
             var fragment = parser.Parse(reader, out var parseErrors);
@@ -1192,6 +1202,7 @@ namespace SqlTestSupport
 
             if (fragment is TSqlScript script && script.Batches.Count > 1)
             {
+                // command text 実行では GO を扱わない。
                 throw new SqlUnsupportedScriptException(sql, "GO batch separators are not supported for command-text execution.");
             }
 

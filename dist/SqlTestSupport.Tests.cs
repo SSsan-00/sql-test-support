@@ -17,6 +17,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void IsValidSql_does_not_throw_for_valid_sql()
         {
+            // 仕様: Assert facade は valid SQL を失敗扱いにしない。
             SqlAssertFacade.IsValidSql("""
                 SELECT Id
                 FROM dbo.Customers
@@ -26,6 +27,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void IsValidSql_throws_assert_failed_for_invalid_sql()
         {
+            // 仕様: test-facing API は低レベル例外を AssertFailedException に変換する。
             var exception = Assert.Throws<AssertFailedException>(() =>
                 SqlAssertFacade.IsValidSql("SELECT FROM WHERE", "Custom SQL failed."));
 
@@ -36,6 +38,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void NormalizeSql_returns_normalized_sql()
         {
+            // 仕様: 呼び出し側は正規化済み SQL を string として受け取れる。
             var normalized = SqlAssertFacade.NormalizeSql("""
                 select Id
                 from dbo.Customers
@@ -58,6 +61,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Mock_db_can_override_first_sql_argument_methods()
         {
+            // 仕様: 本番DBクラスの第一引数 SQL 実行メソッドだけを override すれば Mock 化できる。
             var db = new MockProductionDb();
             db.WhenSql(q => q.IsSelectFrom("dbo.Customers")).ReturnsScalar("Alice");
             db.WhenSql(q => q.IsUpdate("dbo.Customers")).ReturnsAffectedRows(1);
@@ -76,6 +80,7 @@ namespace SqlTestSupport.Tests
 
         private class ProductionDb
         {
+            // 導入先の本番DBクラスを最小化した形。
             public virtual int Execute(string sql, object? parameters = null)
                 => throw new NotSupportedException(sql);
 
@@ -87,6 +92,7 @@ namespace SqlTestSupport.Tests
         {
             private readonly SqlMockRouter _router = new();
 
+            // Mock DB は router の薄い facade に留める。
             public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
                 => _router.WhenSql(predicate);
 
@@ -114,6 +120,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Scalar_returns_registered_value_for_matching_select()
         {
+            // 仕様: SELECT 形状に一致した rule は scalar 戻り値を返す。
             var router = new SqlMockRouter();
             router
                 .WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.WhereUses("Id"))
@@ -132,6 +139,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void ExecuteNonQuery_returns_registered_affected_rows_for_matching_update()
         {
+            // 仕様: UPDATE 形状に一致した rule は affected rows を返す。
             var router = new SqlMockRouter();
             router
                 .WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id"))
@@ -150,6 +158,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Router_rejects_unregistered_sql()
         {
+            // 仕様: strict mode。valid でも未登録 SQL は失敗する。
             var router = new SqlMockRouter();
 
             Assert.Throws<AssertFailedException>(() =>
@@ -162,6 +171,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Router_rejects_invalid_sql_before_matching()
         {
+            // 仕様: rule matching より先に SQL 構文検証を強制する。
             var router = new SqlMockRouter();
             router.WhenSql(_ => true).ReturnsScalar(1);
 
@@ -172,6 +182,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Scalar_sequence_returns_values_in_order()
         {
+            // 仕様: sequence は同じ rule への呼び出し順に消費される。
             var router = new SqlMockRouter();
             router
                 .WhenSql(q => q.IsSelectFrom("dbo.Customers"))
@@ -187,6 +198,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void VerifyAll_fails_when_rule_was_not_called()
         {
+            // 仕様: 登録した rule が未使用なら VerifyAll で検出する。
             var router = new SqlMockRouter();
             router.WhenSql(q => q.IsSelectFrom("dbo.Customers")).ReturnsScalar("Alice");
 
@@ -209,6 +221,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Analyze_accepts_valid_sql_server_2022_tsql()
         {
+            // 仕様: SQL Server 2022 として valid な SQL は fingerprint 付きで解析できる。
             var result = _service.Analyze("""
                 SELECT Id, Name
                 FROM dbo.Customers
@@ -221,6 +234,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Analyze_rejects_invalid_tsql()
         {
+            // 仕様: parse error は構造化された diagnostic を持つ例外になる。
             var exception = Assert.Throws<SqlSyntaxValidationException>(() =>
                 _service.Analyze("SELECT FROM WHERE"));
 
@@ -230,6 +244,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Normalize_returns_sql_only_when_round_trip_fingerprint_matches()
         {
+            // 仕様: 正規化後 SQL は再 parse され、元 SQL と同じ fingerprint の場合だけ返る。
             var result = _service.Normalize("""
                 select Id, Name
                 from dbo.Customers
@@ -244,6 +259,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Inspect_extracts_select_shape()
         {
+            // 仕様: SELECT の参照 table、選択列、WHERE 列、parameter を抽出する。
             var result = _service.Inspect("""
                 SELECT Id, Name
                 FROM dbo.Customers
@@ -261,6 +277,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Inspect_extracts_update_target_and_where_columns()
         {
+            // 仕様: UPDATE は更新対象 table と WHERE 列を Mock 分岐に使える。
             var result = _service.Inspect("""
                 UPDATE dbo.Customers
                 SET Name = @Name
