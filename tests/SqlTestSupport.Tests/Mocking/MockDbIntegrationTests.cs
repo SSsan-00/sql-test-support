@@ -44,8 +44,8 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Mock_db_can_validate_unregistered_void_sql_without_mock_behavior()
         {
-            // validate-only mode の Mock DB は未登録 void SQL を構文解析だけで通せる。
-            var db = new MockVoidProductionDb(UnmatchedSqlBehavior.ValidateOnlyForCommands);
+            // 既定の Mock DB は未登録 void SQL を構文解析だけで通せる。
+            var db = new MockVoidProductionDb();
 
             db.Execute("""
                 UPDATE dbo.Customers
@@ -95,7 +95,8 @@ namespace SqlTestSupport.Tests
             private readonly SqlMockRouter _router;
 
             public MockVoidProductionDb(
-                UnmatchedSqlBehavior unmatchedSqlBehavior = UnmatchedSqlBehavior.Strict)
+                UnmatchedSqlBehavior unmatchedSqlBehavior =
+                    UnmatchedSqlBehavior.ReturnNullForNullableScalarsAndValidateOnlyForCommands)
             {
                 _router = new SqlMockRouter(unmatchedSqlBehavior);
             }

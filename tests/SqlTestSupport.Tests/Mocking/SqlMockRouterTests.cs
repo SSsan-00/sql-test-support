@@ -110,10 +110,27 @@ namespace SqlTestSupport.Tests
         }
 
         [TestMethod]
-        public void ExecuteCommand_rejects_unregistered_sql_by_default()
+        public void ExecuteCommand_default_accepts_unregistered_valid_sql()
         {
-            // 既定は strict。戻り値なしでも未登録 SQL は失敗する。
+            // 既定では未登録の戻り値なし SQL を解析・履歴記録だけで通す。
             var router = new SqlMockRouter();
+
+            router.ExecuteCommand("""
+                UPDATE dbo.Customers
+                SET Name = @Name
+                WHERE Id = @Id
+                """);
+
+            Assert.HasCount(1, router.History);
+            Assert.AreEqual(DbCallMethod.Command, router.History[0].Method);
+            Assert.IsTrue(router.History[0].IsUpdate("dbo.Customers"));
+        }
+
+        [TestMethod]
+        public void ExecuteCommand_strict_mode_rejects_unregistered_sql()
+        {
+            // strict mode を明示した場合は未登録の戻り値なし SQL も失敗する。
+            var router = new SqlMockRouter(UnmatchedSqlBehavior.Strict);
 
             Assert.Throws<AssertFailedException>(() =>
                 router.ExecuteCommand("""
@@ -163,9 +180,55 @@ namespace SqlTestSupport.Tests
         }
 
         [TestMethod]
-        public void Router_rejects_unregistered_sql()
+        public void Scalar_default_returns_null_for_unregistered_nullable_sql()
         {
-            // strict mode。valid でも未登録 SQL は失敗する。
+            // 既定では未登録でも nullable scalar なら検証後に null を返す。
+            var router = new SqlMockRouter();
+
+            var value = router.Scalar<int?>("""
+                SELECT ParentCustomerId
+                FROM dbo.Customers
+                WHERE Id = @Id
+                """);
+
+            Assert.IsNull(value);
+            Assert.HasCount(1, router.History);
+            Assert.AreEqual(DbCallMethod.Scalar, router.History[0].Method);
+        }
+
+        [TestMethod]
+        public void Scalar_default_returns_null_for_unregistered_reference_sql()
+        {
+            // reference type scalar は null 返却可能な型として扱う。
+            var router = new SqlMockRouter();
+
+            var value = router.Scalar<string?>("""
+                SELECT MiddleName
+                FROM dbo.Customers
+                WHERE Id = @Id
+                """);
+
+            Assert.IsNull(value);
+        }
+
+        [TestMethod]
+        public void Scalar_strict_mode_rejects_unregistered_nullable_sql()
+        {
+            // strict mode は nullable scalar でも未登録 SQL を失敗させる。
+            var router = new SqlMockRouter(UnmatchedSqlBehavior.Strict);
+
+            Assert.Throws<AssertFailedException>(() =>
+                router.Scalar<int?>("""
+                    SELECT ParentCustomerId
+                    FROM dbo.Customers
+                    WHERE Id = @Id
+                    """));
+        }
+
+        [TestMethod]
+        public void Router_rejects_unregistered_non_nullable_sql()
+        {
+            // 既定でも non-nullable scalar は返す値を決められないため失敗する。
             var router = new SqlMockRouter();
 
             Assert.Throws<AssertFailedException>(() =>

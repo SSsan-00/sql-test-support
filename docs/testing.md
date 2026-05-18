@@ -28,10 +28,11 @@
 
 - `WhenSql(...).ReturnsScalar(...)` は scalar call に対応する
 - nullable な scalar call は `ReturnsScalar` 省略時に `null` を返す
+- 未登録の nullable scalar call は既定で `null` を返す
 - `WhenSql(...).ReturnsAffectedRows(...)` は non-query call に対応する
 - `WhenSql(...).Completes()` は void command call に対応する
-- 未登録 SQL は失敗する
-- `ValidateOnlyForCommands` では未登録 void command を構文解析だけで通す
+- 未登録 void command は既定で構文解析だけ通す
+- strict mode は未登録 SQL を失敗させる
 - invalid SQL は rule matching 前に失敗する
 - void command に affected rows rule を流用すると失敗する
 - `ValidateOnlyForCommands` でも scalar / non-query の未登録 SQL は失敗する

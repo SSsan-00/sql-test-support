@@ -41,14 +41,25 @@ router.ExecuteCommand("UPDATE dbo.Customers SET Name = @Name WHERE Id = @Id");
 router.VerifyAll();
 ```
 
-未登録の戻り値なし command を構文解析だけで通したい場合は、router 作成時に `ValidateOnlyForCommands` を指定します。
+既定の `SqlMockRouter()` は、未登録 SQL でも安全に返せる範囲だけ fallback します。
 
 ```csharp
-var router = new SqlMockRouter(UnmatchedSqlBehavior.ValidateOnlyForCommands);
 router.ExecuteCommand("UPDATE dbo.Customers SET Name = @Name WHERE Id = @Id");
+int? parentId = router.Scalar<int?>("SELECT ParentCustomerId FROM dbo.Customers WHERE Id = @Id");
 ```
 
-この mode でも `Scalar<T>` と `ExecuteNonQuery` は戻り値を返す SQL のため、未登録 SQL を許可しません。nullable な `Scalar<T>` は、`WhenSql` に一致する rule があれば `ReturnsScalar` を省略でき、その場合は `null` を返します。
+- 未登録の `ExecuteCommand`: validate / normalize / inspect / history 記録だけ行って成功する
+- 未登録の nullable `Scalar<T?>`: validate / normalize / inspect / history 記録後に `null` を返す
+- 未登録の non-nullable `Scalar<T>`: 返す値を決められないため失敗する
+- 未登録の `ExecuteNonQuery`: affected rows を決められないため失敗する
+
+nullable reference type は実行時の `T` だけでは非 nullable reference type と区別しづらいため、reference type の scalar は null 返却可能な型として扱います。
+
+未登録 SQL をすべて失敗させたい場合は、router 作成時に `Strict` を指定します。
+
+```csharp
+var router = new SqlMockRouter(UnmatchedSqlBehavior.Strict);
+```
 
 登録メソッド:
 

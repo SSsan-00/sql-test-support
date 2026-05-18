@@ -78,12 +78,14 @@ db.WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id"))
   .ReturnsAffectedRows(1);
 ```
 
-戻り値なし SQL 実行だけ、未登録 SQL を構文解析のみで通す mode もあります。
+未登録 SQL も、既定では安全に返せる範囲だけ fallback します。
 
 ```csharp
-var router = new SqlMockRouter(UnmatchedSqlBehavior.ValidateOnlyForCommands);
 router.ExecuteCommand("UPDATE dbo.Customers SET Name = @Name WHERE Id = @Id");
+int? parentId = router.Scalar<int?>("SELECT ParentCustomerId FROM dbo.Customers WHERE Id = @Id");
 ```
+
+`ExecuteCommand` は構文解析・正規化・履歴記録だけで成功し、nullable scalar は `null` を返します。`ExecuteNonQuery` と non-nullable scalar は戻り値を決められないため、未登録なら失敗します。すべての未登録 SQL を失敗させたい場合は `new SqlMockRouter(UnmatchedSqlBehavior.Strict)` を使います。
 
 ## Bootstrap
 

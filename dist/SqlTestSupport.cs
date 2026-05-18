@@ -165,6 +165,9 @@ namespace SqlTestSupport
 
     public sealed class SqlMockRouter
     {
+        private const UnmatchedSqlBehavior DefaultUnmatchedSqlBehavior =
+            UnmatchedSqlBehavior.ReturnNullForNullableScalarsAndValidateOnlyForCommands;
+
         private readonly SqlValidationService _validationService;
         private readonly UnmatchedSqlBehavior _unmatchedSqlBehavior;
         private readonly List<SqlMockRule> _rules = new();
@@ -173,7 +176,7 @@ namespace SqlTestSupport
         private int _globalCallCount;
 
         public SqlMockRouter()
-            : this(UnmatchedSqlBehavior.Strict)
+            : this(DefaultUnmatchedSqlBehavior)
         {
         }
 
@@ -184,7 +187,7 @@ namespace SqlTestSupport
 
         public SqlMockRouter(
             SqlValidationService validationService,
-            UnmatchedSqlBehavior unmatchedSqlBehavior = UnmatchedSqlBehavior.Strict)
+            UnmatchedSqlBehavior unmatchedSqlBehavior = DefaultUnmatchedSqlBehavior)
         {
             _validationService = validationService;
             _unmatchedSqlBehavior = unmatchedSqlBehavior;
@@ -218,7 +221,7 @@ namespace SqlTestSupport
 
             if (rule is null)
             {
-                if (_unmatchedSqlBehavior == UnmatchedSqlBehavior.ValidateOnlyForCommands)
+                if (AllowsUnmatchedCommand())
                 {
                     return;
                 }
@@ -233,8 +236,20 @@ namespace SqlTestSupport
         {
             // scalar は nullable と non-nullable で null の扱いを分ける。
             var invocation = CreateInvocation(DbCallMethod.Scalar, sql);
-            var rule = FindRule(invocation);
-            var value = rule.GetScalar(invocation, default(T) is null);
+            var rule = FindRuleOrDefault(invocation);
+            var allowNull = default(T) is null;
+
+            if (rule is null)
+            {
+                if (allowNull && AllowsUnmatchedNullableScalar())
+                {
+                    return default!;
+                }
+
+                throw UnexpectedSql(invocation);
+            }
+
+            var value = rule.GetScalar(invocation, allowNull);
 
             if (value is null)
             {
@@ -308,6 +323,15 @@ namespace SqlTestSupport
 
         private SqlMockRule FindRule(SqlInvocation invocation)
             => FindRuleOrDefault(invocation) ?? throw UnexpectedSql(invocation);
+
+        private bool AllowsUnmatchedCommand()
+            => _unmatchedSqlBehavior is
+                UnmatchedSqlBehavior.ValidateOnlyForCommands or
+                UnmatchedSqlBehavior.ReturnNullForNullableScalarsAndValidateOnlyForCommands;
+
+        private bool AllowsUnmatchedNullableScalar()
+            => _unmatchedSqlBehavior ==
+               UnmatchedSqlBehavior.ReturnNullForNullableScalarsAndValidateOnlyForCommands;
 
         private SqlMockRule? FindRuleOrDefault(SqlInvocation invocation)
         {
@@ -644,7 +668,8 @@ namespace SqlTestSupport
     public enum UnmatchedSqlBehavior
     {
         Strict = 0,
-        ValidateOnlyForCommands
+        ValidateOnlyForCommands,
+        ReturnNullForNullableScalarsAndValidateOnlyForCommands
     }
 
     public sealed class SqlAstFingerprinter

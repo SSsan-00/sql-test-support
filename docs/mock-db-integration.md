@@ -57,7 +57,7 @@ SQL string
   -> AST metadata を抽出
   -> invocation history に記録
   -> WhenSql ルールを評価
-  -> 登録済みの振る舞いを返す。未登録なら fail
+  -> 登録済みの振る舞い、または既定 fallback を返す
 ```
 
 テストメソッドからの具体的な利用パターンは [テストメソッドでの使い方](test-method-usage.md) を参照します。
@@ -72,22 +72,34 @@ db.WhenSql(q => q.IsUpdate("dbo.Customers"))
   .ReturnsAffectedRows(1);
 ```
 
-## Strict 動作
+## 既定動作
 
-router はデフォルトで strict に動きます。
+router は既定で、未登録 SQL でも安全に扱える範囲だけ fallback します。
 
 - invalid SQL は matching 前に失敗する
-- 未登録 SQL は失敗する
+- 未登録の `ExecuteCommand` は validate / normalize / inspect / history 記録だけ行う
+- 未登録の nullable `Scalar<T?>` は validate / normalize / inspect / history 記録後に `null` を返す
+- 未登録の non-nullable `Scalar<T>` は失敗する
+- 未登録の `ExecuteNonQuery` は失敗する
 - `ReturnsScalar` の rule は `ExecuteNonQuery` を満たせない
 - `ReturnsAffectedRows` の rule は `Scalar<T>` を満たせない
 - `ReturnsAffectedRows` の rule は `ExecuteCommand` を満たせない
 - nullable な `Scalar<T>` は、`WhenSql` に一致する未設定 rule の場合 `null` を返せる
-- 戻り値なし command には `Completes` rule が必要
+- 登録済み rule に一致した戻り値なし command には `Completes` rule が必要
 - 登録済み rule が一度も呼ばれない場合、`VerifyAll()` で失敗する
 
-## 未登録 void command の validate-only mode
+reference type の scalar は、C# の nullable annotation を実行時に厳密判定しないため null 返却可能な型として扱います。
 
-戻り値なし実行メソッドに限り、未登録 SQL を構文解析だけで通す mode を選べます。
+すべての未登録 SQL を失敗させたい場合は、strict mode を明示します。
+
+```csharp
+private readonly SqlMockRouter _router =
+    new(UnmatchedSqlBehavior.Strict);
+```
+
+## command-only validate mode
+
+戻り値なし実行メソッドだけを未登録許可し、nullable scalar は未登録時に失敗させたい場合は `ValidateOnlyForCommands` を使います。
 
 ```csharp
 public sealed class MockAppDb : AppDb
