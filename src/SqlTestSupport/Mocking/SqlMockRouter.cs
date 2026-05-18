@@ -29,8 +29,10 @@ namespace SqlTestSupport
             _unmatchedSqlBehavior = unmatchedSqlBehavior;
         }
 
+        // 実行順や正規化後 SQL を後から検証できる履歴。
         public IReadOnlyList<SqlInvocation> History => _history;
 
+        // SQL 形状に対する期待値を登録する。
         public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
         {
             ArgumentNullException.ThrowIfNull(predicate);
@@ -42,6 +44,7 @@ namespace SqlTestSupport
 
         public int ExecuteNonQuery(string sql)
         {
+            // 更新系は一致 rule の affected rows を返す。
             var invocation = CreateInvocation(DbCallMethod.ExecuteNonQuery, sql);
             var rule = FindRule(invocation);
             return rule.GetAffectedRows(invocation);
@@ -67,6 +70,7 @@ namespace SqlTestSupport
 
         public T Scalar<T>(string sql)
         {
+            // scalar は nullable と non-nullable で null の扱いを分ける。
             var invocation = CreateInvocation(DbCallMethod.Scalar, sql);
             var rule = FindRule(invocation);
             var value = rule.GetScalar(invocation, default(T) is null);
@@ -91,6 +95,7 @@ namespace SqlTestSupport
 
         public void VerifyAll()
         {
+            // 未使用 rule はテストの期待漏れとして失敗させる。
             var failures = _rules
                 .Where(rule => rule.CallCount == 0)
                 .Select((rule, index) => $"Rule #{index + 1} was not called.")
