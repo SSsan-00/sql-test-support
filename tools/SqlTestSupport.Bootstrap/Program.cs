@@ -36,9 +36,20 @@ if (options.SelfContainedScriptPath is not null)
     Console.WriteLine($"  {options.SelfContainedScriptPath}");
 }
 
+if (options.SelfContainedTargetsPath is not null)
+{
+    WriteSelfContainedTargets(
+        outputPath: options.SelfContainedTargetsPath,
+        runtimeBundlePath: runtimeBundle,
+        testBundlePath: testBundle);
+
+    Console.WriteLine($"  {options.SelfContainedTargetsPath}");
+}
+
 static BootstrapOptions ParseOptions(string[] args, string root)
 {
     string? selfContainedScriptPath = null;
+    string? selfContainedTargetsPath = null;
 
     for (var index = 0; index < args.Length; index++)
     {
@@ -54,6 +65,15 @@ static BootstrapOptions ParseOptions(string[] args, string root)
                 selfContainedScriptPath = ResolveOutputPath(root, args[++index]);
                 break;
 
+            case "--self-contained-targets":
+                if (index + 1 >= args.Length)
+                {
+                    throw new ArgumentException("--self-contained-targets requires an output path.");
+                }
+
+                selfContainedTargetsPath = ResolveOutputPath(root, args[++index]);
+                break;
+
             case "--help":
             case "-h":
                 PrintUsage();
@@ -65,7 +85,7 @@ static BootstrapOptions ParseOptions(string[] args, string root)
         }
     }
 
-    return new BootstrapOptions(selfContainedScriptPath);
+    return new BootstrapOptions(selfContainedScriptPath, selfContainedTargetsPath);
 }
 
 static string ResolveOutputPath(string root, string path)
@@ -79,7 +99,8 @@ static void PrintUsage()
     Console.WriteLine("  dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csproj -- [options]");
     Console.WriteLine();
     Console.WriteLine("Options:");
-    Console.WriteLine("  --self-contained-script <path>  Also generate a single-file shell script that expands the bundled sources.");
+    Console.WriteLine("  --self-contained-script <path>   Also generate a single-file shell script that expands the bundled sources.");
+    Console.WriteLine("  --self-contained-targets <path>  Also generate a single-file MSBuild targets file that expands the runtime source during build.");
 }
 
 static string FindRepositoryRoot(string start)
@@ -232,6 +253,93 @@ static void WriteSelfContainedScript(string outputPath, IReadOnlyList<BundleFile
     }
 }
 
-internal sealed record BootstrapOptions(string? SelfContainedScriptPath);
+
+static void WriteSelfContainedTargets(string outputPath, string runtimeBundlePath, string testBundlePath)
+{
+    var directory = Path.GetDirectoryName(outputPath);
+    if (!string.IsNullOrEmpty(directory))
+    {
+        Directory.CreateDirectory(directory);
+    }
+
+    var runtimeBase64 = Convert.ToBase64String(File.ReadAllBytes(runtimeBundlePath), Base64FormattingOptions.InsertLineBreaks)
+        .Replace("\r\n", "\n", StringComparison.Ordinal);
+    var testBase64 = Convert.ToBase64String(File.ReadAllBytes(testBundlePath), Base64FormattingOptions.InsertLineBreaks)
+        .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    var output = new StringBuilder();
+    output.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+    output.AppendLine("<Project>");
+    output.AppendLine("  <!--");
+    output.AppendLine("    SqlTestSupport self-contained MSBuild bootstrap.");
+    output.AppendLine("    Copy this file as Directory.Build.targets next to the destination test project");
+    output.AppendLine("    and build the project. The embedded source is expanded under obj/ and compiled.");
+    output.AppendLine("  -->");
+    output.AppendLine();
+    output.AppendLine("  <PropertyGroup>");
+    output.AppendLine("    <SqlTestSupportExpandOnBuild Condition=\"'$(SqlTestSupportExpandOnBuild)' == ''\">true</SqlTestSupportExpandOnBuild>");
+    output.AppendLine("    <SqlTestSupportIncludeSelfTests Condition=\"'$(SqlTestSupportIncludeSelfTests)' == ''\">false</SqlTestSupportIncludeSelfTests>");
+    output.AppendLine("    <SqlTestSupportAddPackageReferences Condition=\"'$(SqlTestSupportAddPackageReferences)' == ''\">true</SqlTestSupportAddPackageReferences>");
+    output.AppendLine("  </PropertyGroup>");
+    output.AppendLine();
+    output.AppendLine("  <ItemGroup Condition=\"'$(SqlTestSupportAddPackageReferences)' == 'true'\">");
+    output.AppendLine("    <PackageReference Include=\"Microsoft.SqlServer.TransactSql.ScriptDom\" Version=\"180.18.1\" Condition=\"'@(PackageReference->WithMetadataValue(\'Identity\', \'Microsoft.SqlServer.TransactSql.ScriptDom\'))' == ''\" />");
+    output.AppendLine("    <PackageReference Include=\"MSTest.TestFramework\" Version=\"4.0.2\" Condition=\"'@(PackageReference->WithMetadataValue(\'Identity\', \'MSTest.TestFramework\'))' == ''\" />");
+    output.AppendLine("  </ItemGroup>");
+    output.AppendLine();
+    output.AppendLine("  <UsingTask TaskName=\"SqlTestSupportWriteEmbeddedFile\" TaskFactory=\"RoslynCodeTaskFactory\" AssemblyFile=\"$(MSBuildToolsPath)\\Microsoft.Build.Tasks.Core.dll\">");
+    output.AppendLine("    <ParameterGroup>");
+    output.AppendLine("      <OutputPath ParameterType=\"System.String\" Required=\"true\" />");
+    output.AppendLine("      <Base64Content ParameterType=\"System.String\" Required=\"true\" />");
+    output.AppendLine("    </ParameterGroup>");
+    output.AppendLine("    <Task>");
+    output.AppendLine("      <Using Namespace=\"System\" />");
+    output.AppendLine("      <Using Namespace=\"System.IO\" />");
+    output.AppendLine("      <Using Namespace=\"System.Text\" />");
+    output.AppendLine("      <Code Type=\"Fragment\" Language=\"cs\"><![CDATA[");
+    output.AppendLine("var directory = Path.GetDirectoryName(OutputPath);");
+    output.AppendLine("if (!string.IsNullOrEmpty(directory))");
+    output.AppendLine("{");
+    output.AppendLine("    Directory.CreateDirectory(directory);");
+    output.AppendLine("}");
+    output.AppendLine();
+    output.AppendLine("File.WriteAllText(");
+    output.AppendLine("    OutputPath,");
+    output.AppendLine("    Encoding.UTF8.GetString(Convert.FromBase64String(Base64Content)),");
+    output.AppendLine("    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));");
+    output.AppendLine("      ]]></Code>");
+    output.AppendLine("    </Task>");
+    output.AppendLine("  </UsingTask>");
+    output.AppendLine();
+    output.AppendLine("  <PropertyGroup>");
+    output.AppendLine("    <SqlTestSupportRuntimeBundleBase64>");
+    output.AppendLine(runtimeBase64);
+    output.AppendLine("    </SqlTestSupportRuntimeBundleBase64>");
+    output.AppendLine("    <SqlTestSupportTestBundleBase64>");
+    output.AppendLine(testBase64);
+    output.AppendLine("    </SqlTestSupportTestBundleBase64>");
+    output.AppendLine("  </PropertyGroup>");
+    output.AppendLine();
+    output.AppendLine("  <Target Name=\"SqlTestSupportExpandEmbeddedSources\" BeforeTargets=\"CoreCompile\" Condition=\"'$(SqlTestSupportExpandOnBuild)' == 'true'\">");
+    output.AppendLine("    <PropertyGroup>");
+    output.AppendLine("      <SqlTestSupportExpandedSourceDir>$(IntermediateOutputPath)SqlTestSupport\\</SqlTestSupportExpandedSourceDir>");
+    output.AppendLine("      <SqlTestSupportExpandedRuntimeSource>$(SqlTestSupportExpandedSourceDir)SqlTestSupport.cs</SqlTestSupportExpandedRuntimeSource>");
+    output.AppendLine("      <SqlTestSupportExpandedTestSource>$(SqlTestSupportExpandedSourceDir)SqlTestSupport.Tests.cs</SqlTestSupportExpandedTestSource>");
+    output.AppendLine("    </PropertyGroup>");
+    output.AppendLine();
+    output.AppendLine("    <SqlTestSupportWriteEmbeddedFile OutputPath=\"$(SqlTestSupportExpandedRuntimeSource)\" Base64Content=\"$(SqlTestSupportRuntimeBundleBase64)\" />");
+    output.AppendLine("    <SqlTestSupportWriteEmbeddedFile Condition=\"'$(SqlTestSupportIncludeSelfTests)' == 'true'\" OutputPath=\"$(SqlTestSupportExpandedTestSource)\" Base64Content=\"$(SqlTestSupportTestBundleBase64)\" />");
+    output.AppendLine();
+    output.AppendLine("    <ItemGroup>");
+    output.AppendLine("      <Compile Include=\"$(SqlTestSupportExpandedRuntimeSource)\" Link=\"SqlTestSupport.cs\" />");
+    output.AppendLine("      <Compile Include=\"$(SqlTestSupportExpandedTestSource)\" Link=\"SqlTestSupport.Tests.cs\" Condition=\"'$(SqlTestSupportIncludeSelfTests)' == 'true'\" />");
+    output.AppendLine("    </ItemGroup>");
+    output.AppendLine("  </Target>");
+    output.AppendLine("</Project>");
+
+    File.WriteAllText(outputPath, output.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+}
+
+internal sealed record BootstrapOptions(string? SelfContainedScriptPath, string? SelfContainedTargetsPath);
 
 internal sealed record BundleFile(string RelativePath, string SourcePath);

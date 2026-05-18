@@ -100,7 +100,9 @@ dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csp
 単一ファイル bootstrap も更新する場合:
 
 ```bash
-./bootstrap/bootstrap.sh --self-contained-script bootstrap/SqlTestSupport.expand.sh
+./bootstrap/bootstrap.sh \
+  --self-contained-script bootstrap/SqlTestSupport.expand.sh \
+  --self-contained-targets dist/SqlTestSupport.Directory.Build.targets
 ```
 
 生成物:
@@ -108,6 +110,7 @@ dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csp
 ```text
 dist/SqlTestSupport.cs
 dist/SqlTestSupport.Tests.cs
+dist/SqlTestSupport.Directory.Build.targets
 ```
 
 .NET SDK や元リポジトリなしで生成済みソースを展開したい場合は、単一ファイル bootstrap を使えます。
@@ -115,6 +118,8 @@ dist/SqlTestSupport.Tests.cs
 ```bash
 ./bootstrap/SqlTestSupport.expand.sh /path/to/test-project/SqlTestSupport
 ```
+
+「単一ファイルだけを置いて、ビルド時に展開済みソースを使いたい」場合は、`dist/SqlTestSupport.Directory.Build.targets` を導入先テストプロジェクトと同じディレクトリに `Directory.Build.targets` という名前でコピーしてから通常どおりビルドします。MSBuild が `obj/SqlTestSupport/SqlTestSupport.cs` を自動生成し、その生成済みソースを compile item に追加します。
 
 `SqlTestSupport.cs` は導入先で利用する本体ファイルです。`SqlTestSupport.Tests.cs` は、導入先でも同じ仕様を検証したい場合に使う MSTest の単一ファイルです。
 
@@ -124,7 +129,9 @@ dist/SqlTestSupport.Tests.cs
 dotnet restore
 dotnet test
 dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csproj
-./bootstrap/bootstrap.sh --self-contained-script bootstrap/SqlTestSupport.expand.sh
+./bootstrap/bootstrap.sh \
+  --self-contained-script bootstrap/SqlTestSupport.expand.sh \
+  --self-contained-targets dist/SqlTestSupport.Directory.Build.targets
 ```
 
 ## ドキュメント
