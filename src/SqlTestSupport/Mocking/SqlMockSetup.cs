@@ -1,5 +1,6 @@
 namespace SqlTestSupport
 {
+    // WhenSql で一致した SQL に対する戻り値設定を受け持つ。
     public sealed class SqlMockSetup
     {
         private readonly SqlMockRule _rule;

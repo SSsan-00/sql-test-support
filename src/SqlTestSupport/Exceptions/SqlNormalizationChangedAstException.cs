@@ -1,5 +1,6 @@
 namespace SqlTestSupport
 {
+    // 正規化前後で AST fingerprint が変わったことを示す fail-closed 例外。
     public sealed class SqlNormalizationChangedAstException : SqlValidationException
     {
         public SqlNormalizationChangedAstException(

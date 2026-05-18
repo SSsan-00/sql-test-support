@@ -1,5 +1,6 @@
 namespace SqlTestSupport
 {
+    // WhenSql predicate に渡す、検証・正規化・抽出済みの SQL 呼び出し情報。
     public sealed record SqlInvocation(
         DbCallMethod Method,
         string OriginalSql,
@@ -14,6 +15,7 @@ namespace SqlTestSupport
         int GlobalCallIndex,
         int MethodCallIndex)
     {
+        // テストコード側で SQL 形状を簡潔に表現する matcher。
         public bool IsSelectFrom(string table)
             => StatementKind == SqlStatementKind.Select && ReferencesTable(table);
 

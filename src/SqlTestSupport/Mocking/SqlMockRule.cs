@@ -10,6 +10,7 @@ namespace SqlTestSupport
         Complete
     }
 
+    // 1 つの WhenSql predicate と、それに対応する戻り値設定を保持する。
     internal sealed class SqlMockRule
     {
         private readonly Func<SqlInvocation, bool> _predicate;

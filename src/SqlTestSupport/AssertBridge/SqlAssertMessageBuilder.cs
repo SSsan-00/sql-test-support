@@ -2,6 +2,7 @@ using System.Text;
 
 namespace SqlTestSupport
 {
+    // 低レベル例外を MSTest の失敗メッセージとして読める形に整える。
     public static class SqlAssertMessageBuilder
     {
         public static string Build(string? userMessage, SqlValidationException exception)

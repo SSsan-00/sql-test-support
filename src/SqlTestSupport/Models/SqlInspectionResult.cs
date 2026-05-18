@@ -1,5 +1,6 @@
 namespace SqlTestSupport
 {
+    // Mock 分岐に使う AST 由来の SQL metadata。
     public sealed record SqlInspectionResult(
         string OriginalSql,
         string NormalizedSql,

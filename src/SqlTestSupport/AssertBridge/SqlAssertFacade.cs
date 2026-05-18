@@ -2,10 +2,12 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace SqlTestSupport
 {
+    // 独自 Assert クラスから委譲する MSTest 向け facade。
     public static class SqlAssertFacade
     {
         private static readonly SqlValidationService ValidationService = new();
 
+        // 構文検証だけを行い、失敗時は AssertFailedException に変換する。
         public static void IsValidSql(string sql, string? message = null)
         {
             try
@@ -20,6 +22,7 @@ namespace SqlTestSupport
             }
         }
 
+        // 正規化済み SQL を返し、AST fingerprint 不一致はテスト失敗に変換する。
         public static string NormalizeSql(string sql, string? message = null)
         {
             try

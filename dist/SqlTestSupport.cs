@@ -10,10 +10,12 @@ using System.Text;
 
 namespace SqlTestSupport
 {
+    // 独自 Assert クラスから委譲する MSTest 向け facade。
     public static class SqlAssertFacade
     {
         private static readonly SqlValidationService ValidationService = new();
 
+        // 構文検証だけを行い、失敗時は AssertFailedException に変換する。
         public static void IsValidSql(string sql, string? message = null)
         {
             try
@@ -28,6 +30,7 @@ namespace SqlTestSupport
             }
         }
 
+        // 正規化済み SQL を返し、AST fingerprint 不一致はテスト失敗に変換する。
         public static string NormalizeSql(string sql, string? message = null)
         {
             try
@@ -43,6 +46,7 @@ namespace SqlTestSupport
         }
     }
 
+    // 低レベル例外を MSTest の失敗メッセージとして読める形に整える。
     public static class SqlAssertMessageBuilder
     {
         public static string Build(string? userMessage, SqlValidationException exception)
@@ -101,6 +105,7 @@ namespace SqlTestSupport
         }
     }
 
+    // 正規化前後で AST fingerprint が変わったことを示す fail-closed 例外。
     public sealed class SqlNormalizationChangedAstException : SqlValidationException
     {
         public SqlNormalizationChangedAstException(
@@ -122,6 +127,7 @@ namespace SqlTestSupport
         public string NormalizedFingerprint { get; }
     }
 
+    // ScriptDom が返した parse error を保持する構文検証例外。
     public sealed class SqlSyntaxValidationException : SqlValidationException
     {
         public SqlSyntaxValidationException(string sql, IReadOnlyList<SqlParseDiagnostic> diagnostics)
@@ -133,6 +139,7 @@ namespace SqlTestSupport
         public IReadOnlyList<SqlParseDiagnostic> Diagnostics { get; }
     }
 
+    // command text として扱わない SQL 入力を明示する例外。
     public sealed class SqlUnsupportedScriptException : SqlValidationException
     {
         public SqlUnsupportedScriptException(string sql, string reason)
@@ -144,6 +151,7 @@ namespace SqlTestSupport
         public string Reason { get; }
     }
 
+    // SQL 検証系例外の共通基底。失敗した SQL 文字列を必ず保持する。
     public class SqlValidationException : Exception
     {
         public SqlValidationException(string message, string sql, Exception? innerException = null)
@@ -341,6 +349,7 @@ namespace SqlTestSupport
         Complete
     }
 
+    // 1 つの WhenSql predicate と、それに対応する戻り値設定を保持する。
     internal sealed class SqlMockRule
     {
         private readonly Func<SqlInvocation, bool> _predicate;
@@ -477,6 +486,7 @@ namespace SqlTestSupport
         }
     }
 
+    // WhenSql で一致した SQL に対する戻り値設定を受け持つ。
     public sealed class SqlMockSetup
     {
         private readonly SqlMockRule _rule;
@@ -517,6 +527,7 @@ namespace SqlTestSupport
         }
     }
 
+    // Mock router に到達した DB 実行メソッドの種類。
     public enum DbCallMethod
     {
         ExecuteNonQuery = 0,
@@ -524,11 +535,13 @@ namespace SqlTestSupport
         Command
     }
 
+    // ScriptDom parse 結果と正規化ガード用 fingerprint を保持する。
     public sealed record SqlAnalysisResult(
         string OriginalSql,
         TSqlFragment Fragment,
         string Fingerprint);
 
+    // Mock 分岐に使う AST 由来の SQL metadata。
     public sealed record SqlInspectionResult(
         string OriginalSql,
         string NormalizedSql,
@@ -540,6 +553,7 @@ namespace SqlTestSupport
         IReadOnlySet<string> WhereColumns,
         IReadOnlySet<string> ParameterNames);
 
+    // WhenSql predicate に渡す、検証・正規化・抽出済みの SQL 呼び出し情報。
     public sealed record SqlInvocation(
         DbCallMethod Method,
         string OriginalSql,
@@ -554,6 +568,7 @@ namespace SqlTestSupport
         int GlobalCallIndex,
         int MethodCallIndex)
     {
+        // テストコード側で SQL 形状を簡潔に表現する matcher。
         public bool IsSelectFrom(string table)
             => StatementKind == SqlStatementKind.Select && ReferencesTable(table);
 
@@ -595,6 +610,7 @@ namespace SqlTestSupport
         }
     }
 
+    // 正規化前後の SQL と fingerprint 比較結果を保持する。
     public sealed record SqlNormalizationResult(
         string OriginalSql,
         string NormalizedSql,
@@ -603,6 +619,7 @@ namespace SqlTestSupport
         SqlAnalysisResult OriginalAnalysis,
         SqlAnalysisResult NormalizedAnalysis);
 
+    // ScriptDom parse error を assertion message へ渡すための診断情報。
     public sealed record SqlParseDiagnostic(
         int Number,
         int Line,
@@ -610,6 +627,7 @@ namespace SqlTestSupport
         int Offset,
         string Message);
 
+    // Mock 分岐で使う先頭 SQL statement の大まかな分類。
     public enum SqlStatementKind
     {
         Unknown = 0,
@@ -622,6 +640,7 @@ namespace SqlTestSupport
         Multiple
     }
 
+    // WhenSql に一致しない SQL を router がどう扱うかを表す。
     public enum UnmatchedSqlBehavior
     {
         Strict = 0,
