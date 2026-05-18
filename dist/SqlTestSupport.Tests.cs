@@ -1,8 +1,4 @@
-#nullable enable
-
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-
-[assembly: System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "MSTEST0001:Explicitly enable or disable tests parallelization", Justification = "The self-contained test bundle intentionally omits assembly-level MSTest settings.")]
 
 namespace SqlTestSupport.Tests
 {

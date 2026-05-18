@@ -15,8 +15,7 @@ Bundle(
 
 Bundle(
     sourceRoot: Path.Combine(root, "tests", "SqlTestSupport.Tests"),
-    outputPath: testBundle,
-    suppressMSTestSettingsAnalyzer: true);
+    outputPath: testBundle);
 
 Console.WriteLine("Generated:");
 Console.WriteLine($"  {runtimeBundle}");
@@ -139,7 +138,7 @@ static string FindRepositoryRoot(string start)
     throw new InvalidOperationException("Could not find SqlTestSupport.slnx.");
 }
 
-static void Bundle(string sourceRoot, string outputPath, bool suppressMSTestSettingsAnalyzer = false)
+static void Bundle(string sourceRoot, string outputPath)
 {
     var files = Directory
         .GetFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
@@ -151,7 +150,6 @@ static void Bundle(string sourceRoot, string outputPath, bool suppressMSTestSett
         .ToArray();
 
     var usings = new SortedSet<string>(StringComparer.Ordinal);
-    var assemblyAttributes = new SortedSet<string>(StringComparer.Ordinal);
     var namespaces = new SortedSet<string>(StringComparer.Ordinal);
     var body = new StringBuilder();
 
@@ -159,7 +157,7 @@ static void Bundle(string sourceRoot, string outputPath, bool suppressMSTestSett
     {
         var content = File.ReadAllText(file, Encoding.UTF8).TrimStart('\uFEFF');
         var lines = content.ReplaceLineEndings("\n").Split('\n');
-        var bodyLines = ExtractNamespaceBody(lines, usings, assemblyAttributes, namespaces);
+        var bodyLines = ExtractNamespaceBody(lines, usings, namespaces);
 
         if (body.Length > 0)
         {
@@ -178,27 +176,9 @@ static void Bundle(string sourceRoot, string outputPath, bool suppressMSTestSett
     }
 
     var output = new StringBuilder();
-    output.AppendLine("#nullable enable");
-    output.AppendLine();
-
     foreach (var usingLine in usings)
     {
         output.AppendLine(usingLine);
-    }
-
-    if (assemblyAttributes.Count > 0)
-    {
-        output.AppendLine();
-        foreach (var attributeLine in assemblyAttributes)
-        {
-            output.AppendLine(attributeLine);
-        }
-    }
-
-    if (suppressMSTestSettingsAnalyzer)
-    {
-        output.AppendLine();
-        output.AppendLine("[assembly: System.Diagnostics.CodeAnalysis.SuppressMessage(\"Usage\", \"MSTEST0001:Explicitly enable or disable tests parallelization\", Justification = \"The self-contained test bundle intentionally omits assembly-level MSTest settings.\")]");
     }
 
     if (output.Length > 0)
@@ -217,7 +197,6 @@ static void Bundle(string sourceRoot, string outputPath, bool suppressMSTestSett
 static IReadOnlyList<string> ExtractNamespaceBody(
     IReadOnlyList<string> lines,
     ISet<string> usings,
-    ISet<string> assemblyAttributes,
     ISet<string> namespaces)
 {
     var bodyLines = new List<string>();
@@ -237,7 +216,6 @@ static IReadOnlyList<string> ExtractNamespaceBody(
 
             if (line.StartsWith("[assembly:", StringComparison.Ordinal))
             {
-                assemblyAttributes.Add(line.Trim());
                 continue;
             }
 

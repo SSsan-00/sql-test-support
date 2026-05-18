@@ -1,5 +1,3 @@
-#nullable enable
-
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Collections.Concurrent;

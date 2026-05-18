@@ -119,7 +119,7 @@ bootstrap ツールは次のルールでファイルをまとめます。
 - 重複 `using` を除外する
 - 各 source file の namespace wrapper は外し、bundle 全体を 1 つの namespace block にまとめる
 - 型定義、メソッド、コメントは source file 側の内容を保持する
-- `#nullable enable` を出力する
+- `#nullable enable` や assembly attribute は出力しない
 - UTF-8 without BOM で生成する
 
 ## 単一ファイル bootstrap
