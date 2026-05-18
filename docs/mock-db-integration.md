@@ -81,6 +81,7 @@ router はデフォルトで strict に動きます。
 - `ReturnsScalar` の rule は `ExecuteNonQuery` を満たせない
 - `ReturnsAffectedRows` の rule は `Scalar<T>` を満たせない
 - `ReturnsAffectedRows` の rule は `ExecuteCommand` を満たせない
+- nullable な `Scalar<T>` は、`WhenSql` に一致する未設定 rule の場合 `null` を返せる
 - 戻り値なし command には `Completes` rule が必要
 - 登録済み rule が一度も呼ばれない場合、`VerifyAll()` で失敗する
 

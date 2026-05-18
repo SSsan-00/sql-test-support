@@ -11,6 +11,12 @@ dist/SqlTestSupport.cs
 dist/SqlTestSupport.Tests.cs
 ```
 
+加えて、リポジトリ外や .NET SDK がない環境でも成果物を展開できる単一ファイル bootstrap として、次のシェルスクリプトも生成できます。
+
+```text
+bootstrap/SqlTestSupport.expand.sh
+```
+
 `SqlTestSupport.cs` に含まれるもの:
 
 - assert facade
@@ -37,6 +43,20 @@ dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csp
 ./bootstrap/bootstrap.sh
 ```
 
+単一ファイル bootstrap も同時に生成する場合:
+
+```bash
+./bootstrap/bootstrap.sh --self-contained-script bootstrap/SqlTestSupport.expand.sh
+```
+
+生成済みの単一ファイル bootstrap から導入先へ展開する場合:
+
+```bash
+./bootstrap/SqlTestSupport.expand.sh /path/to/test-project/SqlTestSupport
+```
+
+引数を省略すると、カレントディレクトリ配下の `dist` に展開します。
+
 ## Bundle ルール
 
 bootstrap ツールは次のルールでファイルをまとめます。
@@ -47,6 +67,22 @@ bootstrap ツールは次のルールでファイルをまとめます。
 - top-level `using` を集約する
 - 重複 `using` を除外する
 - namespace block と型定義は保持する
+- `#nullable enable` を出力する
+- UTF-8 without BOM で生成する
+
+## 単一ファイル bootstrap
+
+`--self-contained-script <path>` を指定すると、直前に生成した `dist/SqlTestSupport.cs` と `dist/SqlTestSupport.Tests.cs` を base64 として埋め込んだ shell script を出力します。
+
+この script は .NET SDK や元リポジトリを必要とせず、script 単体で次の 2 ファイルを指定ディレクトリへ展開します。
+
+```text
+SqlTestSupport.cs
+SqlTestSupport.Tests.cs
+```
+
+既定では `bootstrap/SqlTestSupport.expand.sh` をコミット済み成果物として保持し、導入先ではこの 1 ファイルだけをコピーして実行できます。
+
 - `#nullable enable` を出力する
 - UTF-8 without BOM で生成する
 

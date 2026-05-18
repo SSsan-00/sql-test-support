@@ -69,7 +69,7 @@ namespace SqlTestSupport
         {
             var invocation = CreateInvocation(DbCallMethod.Scalar, sql);
             var rule = FindRule(invocation);
-            var value = rule.GetScalar(invocation);
+            var value = rule.GetScalar(invocation, default(T) is null);
 
             if (value is null)
             {

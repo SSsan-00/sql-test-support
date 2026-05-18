@@ -81,8 +81,14 @@ namespace SqlTestSupport
             throw new AssertFailedException($"Affected rows rule returned {value?.GetType().FullName ?? "null"}.");
         }
 
-        public object? GetScalar(SqlInvocation invocation)
+        public object? GetScalar(SqlInvocation invocation, bool allowUnconfiguredNull)
         {
+            if (ReturnKind == SqlMockReturnKind.None && allowUnconfiguredNull)
+            {
+                CallCount++;
+                return null;
+            }
+
             if (ReturnKind != SqlMockReturnKind.Scalar)
             {
                 throw new AssertFailedException("Matched SQL rule does not return a scalar value.");

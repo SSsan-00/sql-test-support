@@ -226,10 +226,10 @@ public void Save_customer_mocks_only_the_audit_command()
 
 ただし、次のメソッドでは未登録 SQL は失敗します。
 
-- `Scalar<T>`: 返す値が必要
+- `Scalar<T>`: 通常は返す値が必要。ただし nullable な戻り値型で `WhenSql` に一致する rule がある場合は `ReturnsScalar` を省略でき、その場合は `null` を返します。
 - `ExecuteNonQuery`: affected rows が必要
 
-戻り値が必要な SQL は、`ReturnsScalar` または `ReturnsAffectedRows` を必ず登録します。
+戻り値が必要な SQL は、`ReturnsScalar` または `ReturnsAffectedRows` を登録します。nullable な scalar で `null` を期待する場合だけ `ReturnsScalar` を省略できます。
 
 ## 同じ分類の SQL が複数回呼ばれる場合
 

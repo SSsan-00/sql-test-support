@@ -194,6 +194,37 @@ namespace SqlTestSupport.Tests
         }
 
         [TestMethod]
+        public void Scalar_returns_null_for_matching_nullable_scalar_without_configured_return()
+        {
+            // 仕様: nullable 戻り値の scalar は戻り値指定を省略した場合 null を返す。
+            var router = new SqlMockRouter();
+            router.WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.WhereUses("Id"));
+
+            var value = router.Scalar<int?>("""
+                SELECT ParentCustomerId
+                FROM dbo.Customers
+                WHERE Id = @Id
+                """);
+
+            Assert.IsNull(value);
+            router.VerifyAll();
+        }
+
+        [TestMethod]
+        public void Scalar_rejects_matching_non_nullable_scalar_without_configured_return()
+        {
+            // 仕様: non-nullable 戻り値の scalar は引き続き戻り値指定を必須にする。
+            var router = new SqlMockRouter();
+            router.WhenSql(q => q.IsSelectFrom("dbo.Customers"));
+
+            Assert.Throws<AssertFailedException>(() =>
+                router.Scalar<int>("""
+                    SELECT COUNT(1)
+                    FROM dbo.Customers
+                    """));
+        }
+
+        [TestMethod]
         public void ExecuteNonQuery_returns_registered_affected_rows_for_matching_update()
         {
             // 仕様: UPDATE 形状に一致した rule は affected rows を返す。
