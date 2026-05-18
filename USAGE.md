@@ -249,7 +249,102 @@ public void Save_customer_writes_audit_log()
 }
 ```
 
-## 7. 未登録 SQL の既定動作
+## 7. Mock 振る舞いなしで構文だけ確認する
+
+テスト対象メソッド内で実行される SQL の構文エラーだけを確認したい場合は、基本的に `WhenSql(...)` を登録しません。SQL は `SqlMockRouter` に渡った時点で必ず validate / normalize / inspect されるため、構文不正があればテスト対象メソッドの実行中に `AssertFailedException` で失敗します。
+
+### 戻り値なし実行メソッドだけの場合
+
+戻り値なしの `ExecuteCommand(sql)` だけを使うテスト対象なら、Mock DB を作ってテスト対象メソッドを実行するだけです。下の例では、少なくとも 1 つの SQL が通ったことを確認するために `History` を公開しています。
+
+```csharp
+[TestMethod]
+public void Save_customer_sql_has_no_syntax_error()
+{
+    var db = new MockAppDb();
+    var service = new CustomerService(db);
+
+    service.SaveCustomer(1, "Alice");
+
+    Assert.IsGreaterThan(0, db.History.Count);
+}
+```
+
+この用途では `WhenSql(...).Completes()` も `VerifyAllSqlExpectations()` も不要です。未登録の `ExecuteCommand` は、構文解析・正規化・履歴記録だけ行って成功します。
+
+`History` は Mock DB から router の `History` をそのまま公開します。
+
+```csharp
+public sealed class MockAppDb : AppDb
+{
+    private readonly SqlMockRouter _router = new();
+
+    public IReadOnlyList<SqlInvocation> History => _router.History;
+
+    public override void ExecuteCommand(string sql, object? parameters = null)
+        => _router.ExecuteCommand(sql);
+}
+```
+
+### 戻り値のある実行メソッドがある場合
+
+戻り値が必要なメソッドは、テスト対象メソッドを最後まで進めるためのダミー値を返します。構文解析は rule matching より前に必ず実行されるため、`WhenSql(_ => true)` のような広い rule を使っても構文検証はスキップされません。
+
+scalar 戻り値のダミー:
+
+```csharp
+[TestMethod]
+public void Get_customer_name_sql_has_no_syntax_error()
+{
+    var db = new MockAppDb();
+    db.WhenSql(_ => true)
+      .ReturnsScalar("dummy");
+
+    var service = new CustomerService(db);
+
+    service.GetCustomerName(1);
+}
+```
+
+更新件数のダミー:
+
+```csharp
+[TestMethod]
+public void Rename_customer_sql_has_no_syntax_error()
+{
+    var db = new MockAppDb();
+    db.WhenSql(_ => true)
+      .ReturnsAffectedRows(1);
+
+    var service = new CustomerService(db);
+
+    service.RenameCustomer(1, "Alice");
+}
+```
+
+複数回呼ばれる場合は sequence を使います。
+
+```csharp
+db.WhenSql(_ => true)
+  .ReturnsScalarSequence("Alice", "Bob");
+
+db.WhenSql(_ => true)
+  .ReturnsAffectedRowsSequence(1, 1, 0);
+```
+
+nullable scalar の戻り値が `null` でよい場合は、未登録のままでも構文解析後に `null` が返ります。
+
+```csharp
+int? parentId = db.Scalar<int?>("""
+    SELECT ParentCustomerId
+    FROM dbo.Customers
+    WHERE Id = @Id
+    """);
+```
+
+`VerifyAllSqlExpectations()` は、登録した rule が本当に呼ばれたことも確認したい場合だけ呼びます。構文確認だけが目的なら必須ではありません。
+
+## 8. 未登録 SQL の既定動作
 
 `new SqlMockRouter()` の既定動作は、未登録 SQL でも安全に返せる範囲だけ fallback します。
 
@@ -277,7 +372,7 @@ private readonly SqlMockRouter _router =
     new(UnmatchedSqlBehavior.ValidateOnlyForCommands);
 ```
 
-## 8. 同じ SQL 分類が複数回呼ばれる場合
+## 9. 同じ SQL 分類が複数回呼ばれる場合
 
 同じ matcher に複数回一致する場合は sequence を使います。
 
@@ -295,7 +390,7 @@ db.WhenSql(q => q.IsUpdate("dbo.Customers"))
   .ReturnsAffectedRowsSequence(0, 1);
 ```
 
-## 9. 何を検証するか
+## 10. 何を検証するか
 
 検証するもの:
 
@@ -313,7 +408,7 @@ db.WhenSql(q => q.IsUpdate("dbo.Customers"))
 
 `EXEC(N'SELECT FROM WHERE')` のような動的 SQL は、外側の `EXEC(...)` が valid なら通ります。内部文字列も検証したい場合は、その文字列を別途 `Assert.IsValidSql` に渡します。
 
-## 10. 導入後の確認
+## 11. 導入後の確認
 
 導入先で確認すること:
 
@@ -325,7 +420,7 @@ db.WhenSql(q => q.IsUpdate("dbo.Customers"))
 
 導入先でも SqlTestSupport の自己検証を実行したい場合は、`dist/SqlTestSupport.Tests.cs` を追加して `dotnet test` を実行します。
 
-## 11. よくある調整
+## 12. よくある調整
 
 既存 DB クラスに `Execute(string sql, object? parameters = null)` 以外の overload がある場合でも、最終的に第一引数の SQL 文字列が共通実行メソッドへ渡るなら、その境界だけを override します。
 
@@ -344,4 +439,3 @@ db.WhenSql(q =>
 ```
 
 ただし、標準の分岐面は `StatementKind`、`TargetTables`、`ReferencedTables`、`SelectedColumns`、`WhereColumns`、`ParameterNames` に寄せます。
-
