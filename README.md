@@ -102,7 +102,8 @@ dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csp
 ```bash
 ./bootstrap/bootstrap.sh \
   --self-contained-script bootstrap/SqlTestSupport.expand.sh \
-  --self-contained-targets dist/SqlTestSupport.Directory.Build.targets
+  --self-contained-targets dist/SqlTestSupport.Directory.Build.targets \
+  --self-contained-csharp bootstrap/SqlTestSupport.Bootstrap.cs
 ```
 
 生成物:
@@ -111,6 +112,7 @@ dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csp
 dist/SqlTestSupport.cs
 dist/SqlTestSupport.Tests.cs
 dist/SqlTestSupport.Directory.Build.targets
+bootstrap/SqlTestSupport.Bootstrap.cs
 ```
 
 .NET SDK や元リポジトリなしで生成済みソースを展開したい場合は、単一ファイル bootstrap を使えます。
@@ -118,6 +120,18 @@ dist/SqlTestSupport.Directory.Build.targets
 ```bash
 ./bootstrap/SqlTestSupport.expand.sh /path/to/test-project/SqlTestSupport
 ```
+
+リポジトリをダウンロードできない環境では、GitHub などの Web UI で `bootstrap/SqlTestSupport.Bootstrap.cs` の中身をコピーし、任意の一時フォルダーで console app の `Program.cs` として貼り付けることで、導入用ファイルを生成できます。
+
+```bash
+mkdir SqlTestSupportBootstrap
+cd SqlTestSupportBootstrap
+dotnet new console --force
+# Program.cs を bootstrap/SqlTestSupport.Bootstrap.cs の内容で置き換える
+dotnet run -- /path/to/test-project/SqlTestSupport
+```
+
+生成された `SqlTestSupport.cs` をテストプロジェクトへ追加してください。ビルド時に自動展開したい場合は、同時に生成される `SqlTestSupport.Directory.Build.targets` をテストプロジェクトと同じディレクトリへ `Directory.Build.targets` という名前でコピーしてから `dotnet build` または `dotnet test` を実行します。
 
 「単一ファイルだけを置いて、ビルド時に展開済みソースを使いたい」場合は、`dist/SqlTestSupport.Directory.Build.targets` を導入先テストプロジェクトと同じディレクトリに `Directory.Build.targets` という名前でコピーしてから通常どおりビルドします。MSBuild が `obj/SqlTestSupport/SqlTestSupport.cs` を自動生成し、その生成済みソースを compile item に追加します。
 
@@ -131,7 +145,8 @@ dotnet test
 dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csproj
 ./bootstrap/bootstrap.sh \
   --self-contained-script bootstrap/SqlTestSupport.expand.sh \
-  --self-contained-targets dist/SqlTestSupport.Directory.Build.targets
+  --self-contained-targets dist/SqlTestSupport.Directory.Build.targets \
+  --self-contained-csharp bootstrap/SqlTestSupport.Bootstrap.cs
 ```
 
 ## ドキュメント
