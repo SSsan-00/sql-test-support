@@ -17,7 +17,8 @@ Bundle(
 Bundle(
     title: "SqlTestSupport test bundle",
     sourceRoot: Path.Combine(root, "tests", "SqlTestSupport.Tests"),
-    outputPath: testBundle);
+    outputPath: testBundle,
+    suppressMSTestSettingsAnalyzer: true);
 
 Console.WriteLine("Generated:");
 Console.WriteLine($"  {runtimeBundle}");
@@ -140,7 +141,7 @@ static string FindRepositoryRoot(string start)
     throw new InvalidOperationException("Could not find SqlTestSupport.slnx.");
 }
 
-static void Bundle(string title, string sourceRoot, string outputPath)
+static void Bundle(string title, string sourceRoot, string outputPath, bool suppressMSTestSettingsAnalyzer = false)
 {
     var files = Directory
         .GetFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
@@ -212,6 +213,12 @@ static void Bundle(string title, string sourceRoot, string outputPath)
         {
             output.AppendLine(attributeLine);
         }
+    }
+
+    if (suppressMSTestSettingsAnalyzer)
+    {
+        output.AppendLine();
+        output.AppendLine("[assembly: System.Diagnostics.CodeAnalysis.SuppressMessage(\"Usage\", \"MSTEST0001:Explicitly enable or disable tests parallelization\", Justification = \"The self-contained test bundle intentionally omits assembly-level MSTest settings.\")]");
     }
 
     output.Append(body);
@@ -385,6 +392,14 @@ static void WriteSelfContainedCSharpBootstrap(string outputPath, string runtimeB
     output.AppendLine("using System.IO;");
     output.AppendLine("using System.Text;");
     output.AppendLine();
+    output.AppendLine("const string RuntimeBundleBase64 = \"\"\"");
+    output.AppendLine(runtimeBase64);
+    output.AppendLine("\"\"\";");
+    output.AppendLine();
+    output.AppendLine("const string TestBundleBase64 = \"\"\"");
+    output.AppendLine(testBase64);
+    output.AppendLine("\"\"\";");
+    output.AppendLine();
     output.AppendLine("var outputDir = \"dist\";");
     output.AppendLine("var includeTests = true;");
     output.AppendLine("var includeTargets = true;");
@@ -487,14 +502,6 @@ static void WriteSelfContainedCSharpBootstrap(string outputPath, string runtimeB
     output.AppendLine("    WriteEmbeddedFile(path, Convert.ToBase64String(Encoding.UTF8.GetBytes(target.ToString())));");
     output.AppendLine("}");
     output.AppendLine();
-    output.AppendLine("const string RuntimeBundleBase64 = \"\"\"");
-    output.AppendLine(runtimeBase64);
-    output.AppendLine("\"\"\";");
-    output.AppendLine();
-    output.AppendLine("const string TestBundleBase64 = \"\"\"");
-    output.AppendLine(testBase64);
-    output.AppendLine("\"\"\";");
-
     File.WriteAllText(outputPath, output.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 }
 
