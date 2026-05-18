@@ -15,6 +15,7 @@ dist/SqlTestSupport.Tests.cs
 
 ```text
 bootstrap/SqlTestSupport.expand.sh
+bootstrap/SqlTestSupport.Bootstrap.cs
 dist/SqlTestSupport.Directory.Build.targets
 ```
 
@@ -49,16 +50,49 @@ dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csp
 ```bash
 ./bootstrap/bootstrap.sh \
   --self-contained-script bootstrap/SqlTestSupport.expand.sh \
-  --self-contained-targets dist/SqlTestSupport.Directory.Build.targets
+  --self-contained-targets dist/SqlTestSupport.Directory.Build.targets \
+  --self-contained-csharp bootstrap/SqlTestSupport.Bootstrap.cs
 ```
 
-生成済みの単一ファイル bootstrap から導入先へ展開する場合:
+生成済みの shell 版単一ファイル bootstrap から導入先へ展開する場合:
 
 ```bash
 ./bootstrap/SqlTestSupport.expand.sh /path/to/test-project/SqlTestSupport
 ```
 
 引数を省略すると、カレントディレクトリ配下の `dist` に展開します。
+
+
+
+### リポジトリをダウンロードできない場合
+
+リポジトリ全体を取得できないユーザーは、Web UI で `bootstrap/SqlTestSupport.Bootstrap.cs` を開き、その内容だけをコピーしてビルドできます。この C# bootstrap は runtime bundle、test bundle、MSBuild targets を埋め込んでいるため、元リポジトリは不要です。
+
+1. 任意の一時フォルダーで console app を作成します。
+
+   ```bash
+   mkdir SqlTestSupportBootstrap
+   cd SqlTestSupportBootstrap
+   dotnet new console --force
+   ```
+
+2. 生成された `Program.cs` を、コピーした `bootstrap/SqlTestSupport.Bootstrap.cs` の内容で置き換えます。
+3. 導入先ディレクトリを指定して実行します。
+
+   ```bash
+   dotnet run -- /path/to/test-project/SqlTestSupport
+   ```
+
+   引数を省略すると、一時フォルダー配下の `dist` に展開します。self-test や targets が不要な場合は次の option を使えます。
+
+   ```bash
+   dotnet run -- /path/to/test-project/SqlTestSupport --skip-tests
+   dotnet run -- /path/to/test-project/SqlTestSupport --skip-targets
+   ```
+
+4. 通常の単一 C# ファイルとして使う場合は、生成された `SqlTestSupport.cs` をテストプロジェクトに追加します。
+5. ビルド時に自動展開したい場合は、生成された `SqlTestSupport.Directory.Build.targets` をテストプロジェクトと同じディレクトリへ `Directory.Build.targets` という名前でコピーし、`dotnet build` または `dotnet test` を実行します。既存の `Directory.Build.targets` がある場合は、生成ファイルを `SqlTestSupport.Directory.Build.targets` という名前で置き、既存ファイルから `<Import Project="SqlTestSupport.Directory.Build.targets" />` を追加します。
+
 
 ビルド時に自動展開する単一ファイル bootstrap を使う場合は、次の 1 ファイルだけを導入先テストプロジェクトと同じディレクトリへ `Directory.Build.targets` という名前で配置します。
 
@@ -90,6 +124,8 @@ bootstrap ツールは次のルールでファイルをまとめます。
 ## 単一ファイル bootstrap
 
 `--self-contained-script <path>` を指定すると、直前に生成した `dist/SqlTestSupport.cs` と `dist/SqlTestSupport.Tests.cs` を base64 として埋め込んだ shell script を出力します。
+
+`--self-contained-csharp <path>` を指定すると、同じ bundle と MSBuild targets 生成処理を埋め込んだ C# source file を出力します。shell script を実行しづらい環境や、リポジトリをダウンロードできず Web UI から source だけをコピーする導入経路ではこちらを使います。
 
 この script は .NET SDK や元リポジトリを必要とせず、script 単体で次の 2 ファイルを指定ディレクトリへ展開します。
 
