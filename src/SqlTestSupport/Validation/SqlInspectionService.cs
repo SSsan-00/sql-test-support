@@ -6,6 +6,7 @@ namespace SqlTestSupport
     {
         public SqlInspectionResult Inspect(SqlNormalizationResult normalization)
         {
+            // 正規化済み SQL からテーブル・列・パラメータを抽出する。
             ArgumentNullException.ThrowIfNull(normalization);
 
             var visitor = new InspectionVisitor();
@@ -57,6 +58,7 @@ namespace SqlTestSupport
 
             public SqlStatementKind GetStatementKind()
             {
+                // 複数種類の文が混じる場合は Multiple として扱う。
                 var distinct = _statementKinds.Distinct().ToArray();
                 return distinct.Length switch
                 {
@@ -260,6 +262,7 @@ namespace SqlTestSupport
                 }
             }
 
+            // SQL の識別子比較では大文字小文字差を無視する。
             private static HashSet<string> NewIdentifierSet()
                 => new(StringComparer.OrdinalIgnoreCase);
 

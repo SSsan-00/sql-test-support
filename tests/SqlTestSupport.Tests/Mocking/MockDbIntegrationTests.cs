@@ -8,7 +8,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Mock_db_can_override_first_sql_argument_methods()
         {
-            // 仕様: 本番DBクラスの第一引数 SQL 実行メソッドだけを override すれば Mock 化できる。
+            // 本番DBクラスの第一引数 SQL 実行メソッドだけを override すれば Mock 化できる。
             var db = new MockProductionDb();
             db.WhenSql(q => q.IsSelectFrom("dbo.Customers")).ReturnsScalar("Alice");
             db.WhenSql(q => q.IsUpdate("dbo.Customers")).ReturnsAffectedRows(1);
@@ -28,7 +28,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Mock_db_can_override_void_sql_argument_method()
         {
-            // 仕様: 戻り値なし本番メソッドも第一引数 SQL を router に渡して検証できる。
+            // 戻り値なし本番メソッドも第一引数 SQL を router に渡して検証できる。
             var db = new MockVoidProductionDb();
             db.WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id")).Completes();
 
@@ -44,7 +44,7 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Mock_db_can_validate_unregistered_void_sql_without_mock_behavior()
         {
-            // 仕様: validate-only mode の Mock DB は未登録 void SQL を構文解析だけで通せる。
+            // validate-only mode の Mock DB は未登録 void SQL を構文解析だけで通せる。
             var db = new MockVoidProductionDb(UnmatchedSqlBehavior.ValidateOnlyForCommands);
 
             db.Execute("""
