@@ -27,6 +27,7 @@
 保証する内容:
 
 - `WhenSql(...).ReturnsScalar(...)` は scalar call に対応する
+- nullable な scalar call は `ReturnsScalar` 省略時に `null` を返す
 - `WhenSql(...).ReturnsAffectedRows(...)` は non-query call に対応する
 - `WhenSql(...).Completes()` は void command call に対応する
 - 未登録 SQL は失敗する

@@ -4,19 +4,83 @@ var root = FindRepositoryRoot(AppContext.BaseDirectory);
 var dist = Path.Combine(root, "dist");
 Directory.CreateDirectory(dist);
 
+var options = ParseOptions(args, root);
+
+var runtimeBundle = Path.Combine(dist, "SqlTestSupport.cs");
+var testBundle = Path.Combine(dist, "SqlTestSupport.Tests.cs");
+
 Bundle(
     title: "SqlTestSupport runtime bundle",
     sourceRoot: Path.Combine(root, "src", "SqlTestSupport"),
-    outputPath: Path.Combine(dist, "SqlTestSupport.cs"));
+    outputPath: runtimeBundle);
 
 Bundle(
     title: "SqlTestSupport test bundle",
     sourceRoot: Path.Combine(root, "tests", "SqlTestSupport.Tests"),
-    outputPath: Path.Combine(dist, "SqlTestSupport.Tests.cs"));
+    outputPath: testBundle);
 
 Console.WriteLine("Generated:");
-Console.WriteLine($"  {Path.Combine(dist, "SqlTestSupport.cs")}");
-Console.WriteLine($"  {Path.Combine(dist, "SqlTestSupport.Tests.cs")}");
+Console.WriteLine($"  {runtimeBundle}");
+Console.WriteLine($"  {testBundle}");
+
+if (options.SelfContainedScriptPath is not null)
+{
+    WriteSelfContainedScript(
+        outputPath: options.SelfContainedScriptPath,
+        files:
+        [
+            new BundleFile("SqlTestSupport.cs", runtimeBundle),
+            new BundleFile("SqlTestSupport.Tests.cs", testBundle),
+        ]);
+
+    Console.WriteLine($"  {options.SelfContainedScriptPath}");
+}
+
+static BootstrapOptions ParseOptions(string[] args, string root)
+{
+    string? selfContainedScriptPath = null;
+
+    for (var index = 0; index < args.Length; index++)
+    {
+        var arg = args[index];
+        switch (arg)
+        {
+            case "--self-contained-script":
+                if (index + 1 >= args.Length)
+                {
+                    throw new ArgumentException("--self-contained-script requires an output path.");
+                }
+
+                selfContainedScriptPath = ResolveOutputPath(root, args[++index]);
+                break;
+
+            case "--help":
+            case "-h":
+                PrintUsage();
+                Environment.Exit(0);
+                break;
+
+            default:
+                throw new ArgumentException($"Unknown argument: {arg}");
+        }
+    }
+
+    return new BootstrapOptions(selfContainedScriptPath);
+}
+
+static string ResolveOutputPath(string root, string path)
+{
+    return Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(root, path));
+}
+
+static void PrintUsage()
+{
+    Console.WriteLine("Usage:");
+    Console.WriteLine("  dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csproj -- [options]");
+    Console.WriteLine();
+    Console.WriteLine("Options:");
+    Console.WriteLine("  --self-contained-script <path>  Also generate a single-file shell script that expands the bundled sources.");
+}
 
 static string FindRepositoryRoot(string start)
 {
@@ -111,3 +175,63 @@ static void Bundle(string title, string sourceRoot, string outputPath)
     output.Append(body);
     File.WriteAllText(outputPath, output.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 }
+
+static void WriteSelfContainedScript(string outputPath, IReadOnlyList<BundleFile> files)
+{
+    var directory = Path.GetDirectoryName(outputPath);
+    if (!string.IsNullOrEmpty(directory))
+    {
+        Directory.CreateDirectory(directory);
+    }
+
+    var output = new StringBuilder();
+    output.AppendLine("#!/usr/bin/env bash");
+    output.AppendLine("set -euo pipefail");
+    output.AppendLine();
+    output.AppendLine("output_dir=\"${1:-dist}\"");
+    output.AppendLine("mkdir -p \"$output_dir\"");
+    output.AppendLine();
+    output.AppendLine("decode_base64() {");
+    output.AppendLine("  if base64 --decode >/dev/null 2>&1 </dev/null; then");
+    output.AppendLine("    base64 --decode");
+    output.AppendLine("  elif base64 -d >/dev/null 2>&1 </dev/null; then");
+    output.AppendLine("    base64 -d");
+    output.AppendLine("  else");
+    output.AppendLine("    base64 -D");
+    output.AppendLine("  fi");
+    output.AppendLine("}");
+    output.AppendLine();
+    output.AppendLine("write_file() {");
+    output.AppendLine("  local relative_path=\"$1\"");
+    output.AppendLine("  local destination=\"$output_dir/$relative_path\"");
+    output.AppendLine("  mkdir -p \"$(dirname \"$destination\")\"");
+    output.AppendLine("  decode_base64 > \"$destination\"");
+    output.AppendLine("  printf 'Wrote %s\\n' \"$destination\"");
+    output.AppendLine("}");
+
+    foreach (var file in files)
+    {
+        var base64 = Convert.ToBase64String(File.ReadAllBytes(file.SourcePath), Base64FormattingOptions.InsertLineBreaks)
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        output.AppendLine();
+        output.AppendLine($"write_file '{file.RelativePath}' <<'SQL_TEST_SUPPORT_BUNDLE'");
+        output.AppendLine(base64);
+        output.AppendLine("SQL_TEST_SUPPORT_BUNDLE");
+    }
+
+    File.WriteAllText(outputPath, output.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+    if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+    {
+        File.SetUnixFileMode(
+            outputPath,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+    }
+}
+
+internal sealed record BootstrapOptions(string? SelfContainedScriptPath);
+
+internal sealed record BundleFile(string RelativePath, string SourcePath);

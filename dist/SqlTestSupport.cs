@@ -268,7 +268,7 @@ namespace SqlTestSupport
         {
             var invocation = CreateInvocation(DbCallMethod.Scalar, sql);
             var rule = FindRule(invocation);
-            var value = rule.GetScalar(invocation);
+            var value = rule.GetScalar(invocation, default(T) is null);
 
             if (value is null)
             {
@@ -460,8 +460,14 @@ namespace SqlTestSupport
             throw new AssertFailedException($"Affected rows rule returned {value?.GetType().FullName ?? "null"}.");
         }
 
-        public object? GetScalar(SqlInvocation invocation)
+        public object? GetScalar(SqlInvocation invocation, bool allowUnconfiguredNull)
         {
+            if (ReturnKind == SqlMockReturnKind.None && allowUnconfiguredNull)
+            {
+                CallCount++;
+                return null;
+            }
+
             if (ReturnKind != SqlMockReturnKind.Scalar)
             {
                 throw new AssertFailedException("Matched SQL rule does not return a scalar value.");

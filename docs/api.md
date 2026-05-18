@@ -48,7 +48,7 @@ var router = new SqlMockRouter(UnmatchedSqlBehavior.ValidateOnlyForCommands);
 router.ExecuteCommand("UPDATE dbo.Customers SET Name = @Name WHERE Id = @Id");
 ```
 
-この mode でも `Scalar<T>` と `ExecuteNonQuery` は戻り値が必要なため、未登録 SQL を許可しません。
+この mode でも `Scalar<T>` と `ExecuteNonQuery` は戻り値を返す SQL のため、未登録 SQL を許可しません。nullable な `Scalar<T>` は、`WhenSql` に一致する rule があれば `ReturnsScalar` を省略でき、その場合は `null` を返します。
 
 登録メソッド:
 

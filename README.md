@@ -97,11 +97,23 @@ router.ExecuteCommand("UPDATE dbo.Customers SET Name = @Name WHERE Id = @Id");
 dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csproj
 ```
 
+単一ファイル bootstrap も更新する場合:
+
+```bash
+./bootstrap/bootstrap.sh --self-contained-script bootstrap/SqlTestSupport.expand.sh
+```
+
 生成物:
 
 ```text
 dist/SqlTestSupport.cs
 dist/SqlTestSupport.Tests.cs
+```
+
+.NET SDK や元リポジトリなしで生成済みソースを展開したい場合は、単一ファイル bootstrap を使えます。
+
+```bash
+./bootstrap/SqlTestSupport.expand.sh /path/to/test-project/SqlTestSupport
 ```
 
 `SqlTestSupport.cs` は導入先で利用する本体ファイルです。`SqlTestSupport.Tests.cs` は、導入先でも同じ仕様を検証したい場合に使う MSTest の単一ファイルです。
@@ -112,6 +124,7 @@ dist/SqlTestSupport.Tests.cs
 dotnet restore
 dotnet test
 dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csproj
+./bootstrap/bootstrap.sh --self-contained-script bootstrap/SqlTestSupport.expand.sh
 ```
 
 ## ドキュメント
