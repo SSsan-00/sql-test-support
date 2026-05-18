@@ -131,7 +131,7 @@ dotnet new console --force
 dotnet run -- /path/to/test-project/SqlTestSupport
 ```
 
-生成された `SqlTestSupport.cs` をテストプロジェクトへ追加してください。ビルド時に自動展開したい場合は、同時に生成される `SqlTestSupport.Directory.Build.targets` をテストプロジェクトと同じディレクトリへ `Directory.Build.targets` という名前でコピーしてから `dotnet build` または `dotnet test` を実行します。
+通常導入では、生成された `SqlTestSupport.cs` をテストプロジェクトへ追加します。導入先でも自己検証したい場合だけ `SqlTestSupport.Tests.cs` も追加します。
 
 「単一ファイルだけを置いて、ビルド時に展開済みソースを使いたい」場合は、`dist/SqlTestSupport.Directory.Build.targets` を導入先テストプロジェクトと同じディレクトリに `Directory.Build.targets` という名前でコピーしてから通常どおりビルドします。MSBuild が `obj/SqlTestSupport/SqlTestSupport.cs` を自動生成し、その生成済みソースを compile item に追加します。
 

@@ -11,7 +11,7 @@ dist/SqlTestSupport.cs
 dist/SqlTestSupport.Tests.cs
 ```
 
-加えて、リポジトリ外や .NET SDK がない環境でも成果物を展開できる単一ファイル bootstrap として、次のファイルも生成できます。
+加えて、リポジトリ外でも成果物を展開できる単一ファイル bootstrap として、次のファイルも生成できます。
 
 ```text
 bootstrap/SqlTestSupport.expand.sh
@@ -31,7 +31,7 @@ dist/SqlTestSupport.Directory.Build.targets
 - models
 - exceptions
 
-`SqlTestSupport.Tests.cs` には、本体ヘルパーと最小 Mock DB 統合例を検証する MSTest をまとめます。
+`SqlTestSupport.Tests.cs` には、本体ヘルパーと最小 Mock DB 統合例を検証する MSTest をまとめます。導入先で自己検証したい場合だけ追加します。
 
 ## 実行方法
 
@@ -117,27 +117,26 @@ bootstrap ツールは次のルールでファイルをまとめます。
 - 導入先プロジェクトの assembly 設定と衝突しないよう `MSTestSettings.cs` は除外する
 - top-level `using` を集約する
 - 重複 `using` を除外する
-- namespace block と型定義は保持する
+- 各 source file の namespace wrapper は外し、bundle 全体を 1 つの namespace block にまとめる
+- 型定義、メソッド、コメントは source file 側の内容を保持する
 - `#nullable enable` を出力する
 - UTF-8 without BOM で生成する
 
 ## 単一ファイル bootstrap
 
-`--self-contained-script <path>` を指定すると、直前に生成した `dist/SqlTestSupport.cs` と `dist/SqlTestSupport.Tests.cs` を base64 として埋め込んだ shell script を出力します。
+`--self-contained-script <path>` を指定すると、直前に生成した `dist/SqlTestSupport.cs` と `dist/SqlTestSupport.Tests.cs` を base64 として埋め込んだ shell script を出力します。この script は .NET SDK や元リポジトリを必要とせず、script 単体で 2 つの C# ファイルを指定ディレクトリへ展開します。
 
 `--self-contained-csharp <path>` を指定すると、同じ bundle と MSBuild targets 生成処理を埋め込んだ C# source file を出力します。shell script を実行しづらい環境や、リポジトリをダウンロードできず Web UI から source だけをコピーする導入経路ではこちらを使います。
 
-この script は .NET SDK や元リポジトリを必要とせず、script 単体で次の 2 ファイルを指定ディレクトリへ展開します。
+shell 版は `SqlTestSupport.cs` と `SqlTestSupport.Tests.cs` だけを出力します。C# bootstrap は既定で次の 3 ファイルを出力します。
 
 ```text
 SqlTestSupport.cs
 SqlTestSupport.Tests.cs
+SqlTestSupport.Directory.Build.targets
 ```
 
-既定では `bootstrap/SqlTestSupport.expand.sh` をコミット済み成果物として保持し、導入先ではこの 1 ファイルだけをコピーして実行できます。
-
-- `#nullable enable` を出力する
-- UTF-8 without BOM で生成する
+ビルド時自動展開を使う場合は、`dist/SqlTestSupport.Directory.Build.targets` または C# bootstrap が生成した `SqlTestSupport.Directory.Build.targets` を導入先に配置します。
 
 生成ファイルは成果物です。開発は分割された source files 側で続けます。
 

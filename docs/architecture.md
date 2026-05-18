@@ -1,6 +1,6 @@
 # アーキテクチャ
 
-開発時は責務ごとにファイルを分け、導入時は bootstrap ツールで単一ファイルにまとめる構成です。
+開発時は責務ごとにファイルを分け、導入時は bootstrap ツールで単一ファイルにまとめる構成です。bundle 生成時は `using` と assembly attribute を集約し、各 source file の namespace wrapper を外して 1 つの namespace block に再構成します。
 
 ## ランタイム構成
 

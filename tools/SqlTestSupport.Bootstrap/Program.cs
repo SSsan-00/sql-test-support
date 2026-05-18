@@ -10,12 +10,10 @@ var runtimeBundle = Path.Combine(dist, "SqlTestSupport.cs");
 var testBundle = Path.Combine(dist, "SqlTestSupport.Tests.cs");
 
 Bundle(
-    title: "SqlTestSupport runtime bundle",
     sourceRoot: Path.Combine(root, "src", "SqlTestSupport"),
     outputPath: runtimeBundle);
 
 Bundle(
-    title: "SqlTestSupport test bundle",
     sourceRoot: Path.Combine(root, "tests", "SqlTestSupport.Tests"),
     outputPath: testBundle,
     suppressMSTestSettingsAnalyzer: true);
@@ -141,7 +139,7 @@ static string FindRepositoryRoot(string start)
     throw new InvalidOperationException("Could not find SqlTestSupport.slnx.");
 }
 
-static void Bundle(string title, string sourceRoot, string outputPath, bool suppressMSTestSettingsAnalyzer = false)
+static void Bundle(string sourceRoot, string outputPath, bool suppressMSTestSettingsAnalyzer = false)
 {
     var files = Directory
         .GetFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)

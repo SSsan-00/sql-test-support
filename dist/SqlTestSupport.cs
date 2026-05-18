@@ -2,6 +2,7 @@
 
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Collections.Concurrent;
 using System.Collections;
 using System.Globalization;
 using System.Reflection;
@@ -643,6 +644,8 @@ namespace SqlTestSupport
             nameof(TSqlFragment.ScriptTokenStream)
         };
 
+        private static readonly ConcurrentDictionary<Type, IReadOnlyList<PropertyInfo>> FingerprintPropertiesCache = new();
+
         public string CreateFingerprint(TSqlFragment fragment)
         {
             ArgumentNullException.ThrowIfNull(fragment);
@@ -735,13 +738,15 @@ namespace SqlTestSupport
         }
 
         private static IReadOnlyList<PropertyInfo> GetFingerprintProperties(Type type)
-            => type.GetProperties(BindingFlags.Instance | BindingFlags.Public)
-                .Where(property =>
-                    property.GetMethod is not null &&
-                    property.GetIndexParameters().Length == 0 &&
-                    !ExcludedProperties.Contains(property.Name))
-                .OrderBy(property => property.Name, StringComparer.Ordinal)
-                .ToArray();
+            => FingerprintPropertiesCache.GetOrAdd(
+                type,
+                static key => key.GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .Where(property =>
+                        property.GetMethod is not null &&
+                        property.GetIndexParameters().Length == 0 &&
+                        !ExcludedProperties.Contains(property.Name))
+                    .OrderBy(property => property.Name, StringComparer.Ordinal)
+                    .ToArray());
 
         private static bool IsScalar(Type type)
         {
