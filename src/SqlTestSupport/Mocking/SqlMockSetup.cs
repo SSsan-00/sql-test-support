@@ -10,33 +10,15 @@ namespace SqlTestSupport
             _rule = rule;
         }
 
-        public SqlMockSetup ReturnsAffectedRows(int affectedRows)
+        public SqlMockSetup ReturnsResult(object? value)
         {
-            _rule.SetAffectedRows(affectedRows);
+            _rule.SetResult(value);
             return this;
         }
 
-        public SqlMockSetup ReturnsAffectedRowsSequence(params int[] affectedRows)
+        public SqlMockSetup ReturnsResultSequence(params object?[] values)
         {
-            _rule.SetAffectedRowsSequence(affectedRows);
-            return this;
-        }
-
-        public SqlMockSetup ReturnsScalar(object? value)
-        {
-            _rule.SetScalar(value);
-            return this;
-        }
-
-        public SqlMockSetup ReturnsScalarSequence(params object?[] values)
-        {
-            _rule.SetScalarSequence(values);
-            return this;
-        }
-
-        public SqlMockSetup Completes()
-        {
-            _rule.SetCompletes();
+            _rule.SetResultSequence(values);
             return this;
         }
     }

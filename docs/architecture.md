@@ -1,6 +1,6 @@
 # アーキテクチャ
 
-開発時は責務ごとにファイルを分け、導入時は bootstrap ツールで単一ファイルにまとめる構成です。bundle 生成時は `using` と assembly attribute を集約し、各 source file の namespace wrapper を外して 1 つの namespace block に再構成します。
+開発時は責務ごとにファイルを分け、導入時は bootstrap ツールで単一ファイルにまとめる構成です。bundle 生成時は `using` を集約し、各 source file の namespace wrapper を外して 1 つの namespace block に再構成します。
 
 ## ランタイム構成
 
@@ -9,62 +9,19 @@ SqlAssertFacade
   SQL 検証エラーを MSTest の AssertFailedException へ変換する。
 
 SqlValidationService
-  Analyze、Normalize、Inspect の処理順を調停する。
+  Analyze と Inspect の呼び出し口を提供する。
 
 SqlServer2022SyntaxAnalyzer
   ScriptDom を使って SQL Server 2022 構文として parse する。
 
-SqlServer2022Normalizer
-  正規化 SQL を生成し、AST fingerprint が変わらないことを検証する。
-
-SqlAstFingerprinter
-  ScriptDom AST から構造 hash を生成する。
-
 SqlInspectionService
-  Mock 分岐用のメタデータを AST から抽出する。
+  Mock 分岐用のメタデータを元 SQL の AST から抽出する。
 
 SqlMockRouter
-  WhenSql ルールを評価し、登録済みの Mock 戻り値を返す。
+  WhenSql ルールを評価し、登録済みの Mock 戻り値または既定 fallback を返す。
 ```
 
-## 正規化の契約
-
-正規化は fail-closed です。
-
-```text
-original SQL
-  -> Sql160 として parse
-  -> original AST fingerprint
-  -> normalized SQL を生成
-  -> normalized SQL を Sql160 として再 parse
-  -> normalized AST fingerprint
-  -> fingerprint 比較
-  -> 一致した場合だけ normalized SQL を返す
-```
-
-fingerprint が一致しない場合は `SqlNormalizationChangedAstException` を投げ、生成済み SQL は返しません。
-
-## Fingerprint の対象
-
-含める情報:
-
-- AST ノード型
-- public な意味的プロパティ
-- enum 値
-- 文字列、数値、boolean 値
-- 子ノードの順序
-- ScriptDom が公開する識別子値と quote 情報
-- literal 値と式構造
-
-除外する情報:
-
-- 行番号、列番号
-- offset、token index
-- token stream
-- 空白
-- コメント
-
-fingerprint は正規化で AST 構造が変わっていないことを検出するための構造ガードです。DB メタデータ上の意味、権限、実行時挙動までは証明しません。
+正規化と AST fingerprint は runtime pipeline から外しています。構文検証が主目的であり、SQL の意味が変わらない正規化を DB 接続なしに保証するより、元 SQL の AST をそのまま Mock 分岐に使う方針です。
 
 ## SQL 方言
 
@@ -72,9 +29,9 @@ fingerprint は正規化で AST 構造が変わっていないことを検出す
 
 ```text
 SQL Server 2022
-ScriptDom SqlVersion.Sql160
-SqlEngineType.Standalone
-QUOTED_IDENTIFIER ON
+ScriptDom TSql160Parser
+QUOTED_IDENTIFIER ON 相当
+single batch command text
 ```
 
 `GO` は SQL Server Management Studio などのクライアント側バッチ区切りであり、通常の command text API では扱いづらいため拒否します。
@@ -86,10 +43,34 @@ QUOTED_IDENTIFIER ON
 - `StatementKind`
 - `TargetTables`
 - `ReferencedTables`
+- `JoinedTables`
 - `SelectedColumns`
 - `WhereColumns`
+- `OrderByColumns`
+- `GroupByColumns`
+- `HavingColumns`
+- `HavingFunctions`
 - `ParameterNames`
-- `NormalizedSql`
-- `Fingerprint`
+- `OriginalSql`
+- `CallIndex`
 
-alias 解決は浅く扱います。たとえば `c.Name` は `c.Name` のまま保持し、`c` が `dbo.Customers` であることを DB 接続なしに解決しません。
+alias 解決は浅く扱います。たとえば `c.Name` は `c.Name` と `Name` を保持しますが、`c` が `dbo.Customers` であることを DB 接続なしに完全解決しません。
+
+## Mock router の責務
+
+`SqlMockRouter` は次の順序で処理します。
+
+```text
+SQL string
+  -> validate / parse
+  -> AST metadata を抽出
+  -> invocation history に記録
+  -> WhenSql ルールを登録順に評価
+  -> 登録済みの戻り値、または既定 fallback を返す
+```
+
+未登録 SQL でも解析は必ず行われます。構文確認だけが目的なら `WhenSql` を登録しなくても、`ExecuteResult<object?>` や独自コレクション戻り値でテスト対象メソッドを進められます。
+
+## Bootstrap 方針
+
+導入先のレビューを軽くするため、runtime と self-test をそれぞれ単一ファイルにまとめます。展開後ソースには導入先プロジェクトと衝突しやすい `#nullable enable` や assembly attribute を出力しません。

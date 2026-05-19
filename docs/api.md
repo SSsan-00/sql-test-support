@@ -4,22 +4,21 @@
 
 ```csharp
 SqlAssertFacade.IsValidSql(sql);
-var normalized = SqlAssertFacade.NormalizeSql(sql);
 ```
 
 既存の独自 `Assert` クラスから呼ぶ facade です。検証失敗時は MSTest の `AssertFailedException` に変換します。
+
+正規化APIは提供しません。主目的は構文検証であり、Mock 分岐は正規化済み文字列ではなく AST metadata を使います。
 
 ## SqlValidationService
 
 ```csharp
 var analysis = service.Analyze(sql);
-var normalization = service.Normalize(sql);
 var inspection = service.Inspect(sql);
 ```
 
-- `Analyze`: SQL を parse し、AST fingerprint を返す
-- `Normalize`: 正規化 SQL を生成し、fingerprint が変わらないことを検証する
-- `Inspect`: SQL を正規化し、Mock 分岐に使う AST metadata を抽出する
+- `Analyze`: SQL を SQL Server 2022 の T-SQL として parse し、ScriptDom AST を返す
+- `Inspect`: SQL を parse し、Mock 分岐に使う AST metadata を抽出する
 
 構文検証の対象範囲は [構文検証の範囲](syntax-validation-scope.md) を参照します。テストメソッドでの使い方は [テストメソッドでの使い方](test-method-usage.md) にまとめています。
 
@@ -29,55 +28,41 @@ var inspection = service.Inspect(sql);
 var router = new SqlMockRouter();
 
 router.WhenSql(q => q.IsSelectFrom("dbo.Customers"))
-      .ReturnsScalar("Alice");
+      .ReturnsResult("Alice");
 
-var name = router.Scalar<string>("SELECT Name FROM dbo.Customers");
-
-router.WhenSql(q => q.IsUpdate("dbo.Customers"))
-      .Completes();
-
-router.ExecuteCommand("UPDATE dbo.Customers SET Name = @Name WHERE Id = @Id");
+var name = router.ExecuteResult<string>("SELECT Name FROM dbo.Customers");
 
 router.VerifyAll();
 ```
 
-既定の `SqlMockRouter()` は、未登録 SQL でも安全に返せる範囲だけ fallback します。
+`ExecuteResult<T>` は SQL を必ず rule matching 前に構文解析します。invalid SQL は登録 rule の有無に関係なく `AssertFailedException` になります。
 
-```csharp
-router.ExecuteCommand("UPDATE dbo.Customers SET Name = @Name WHERE Id = @Id");
-int? parentId = router.Scalar<int?>("SELECT ParentCustomerId FROM dbo.Customers WHERE Id = @Id");
-```
+未登録 SQL の既定動作:
 
-- 未登録の `ExecuteCommand`: validate / normalize / inspect / history 記録だけ行って成功する
-- 未登録の nullable `Scalar<T?>`: validate / normalize / inspect / history 記録後に `null` を返す
-- 未登録の non-nullable `Scalar<T>`: 返す値を決められないため失敗する
-- 未登録の `ExecuteNonQuery`: affected rows を決められないため失敗する
-
-nullable reference type は実行時の `T` だけでは非 nullable reference type と区別しづらいため、reference type の scalar は null 返却可能な型として扱います。
-
-未登録 SQL をすべて失敗させたい場合は、router 作成時に `Strict` を指定します。
-
-```csharp
-var router = new SqlMockRouter(UnmatchedSqlBehavior.Strict);
-```
+- `object?`、nullable value type、reference type は `null` を返す
+- `Dictionary` 継承または `IDictionary<TKey,TValue>` 実装の具象クラスは、public parameterless constructor があれば空の `new()` を返す
+- `int` などの非 nullable value type は、返す値を決められないため失敗する
 
 登録メソッド:
 
 ```csharp
-ReturnsScalar(object? value)
-ReturnsScalarSequence(params object?[] values)
-ReturnsAffectedRows(int affectedRows)
-ReturnsAffectedRowsSequence(params int[] affectedRows)
-Completes()
+ReturnsResult(object? value)
+ReturnsResultSequence(params object?[] values)
 ```
 
 実行メソッド:
 
 ```csharp
-ExecuteNonQuery(string sql)
-Scalar<T>(string sql)
-ExecuteCommand(string sql)
+ExecuteResult<T>(string sql)
 ```
+
+検証メソッド:
+
+```csharp
+VerifyAll()
+```
+
+`VerifyAll()` は、登録した `WhenSql` rule が少なくとも 1 回呼ばれたことを検証します。
 
 ## SqlInvocation
 
@@ -94,6 +79,11 @@ WhereUses(column)
 SelectsColumn(column)
 ReferencesTable(table)
 TargetsTable(table)
+JoinsTable(table)
+OrdersBy(column)
+GroupsBy(column)
+HavingUses(column)
+HavingCalls(functionName)
 HasParameter(parameterName)
 ```
 
@@ -101,14 +91,18 @@ HasParameter(parameterName)
 
 ```csharp
 OriginalSql
-NormalizedSql
-Fingerprint
 StatementKind
 TargetTables
 ReferencedTables
+JoinedTables
 SelectedColumns
 WhereColumns
+OrderByColumns
+GroupByColumns
+HavingColumns
+HavingFunctions
 ParameterNames
-GlobalCallIndex
-MethodCallIndex
+CallIndex
 ```
+
+識別子比較は大文字小文字を無視します。`dbo.Customers` と `Customers` のような schema 付き・なしの差も matcher で軽く吸収します。

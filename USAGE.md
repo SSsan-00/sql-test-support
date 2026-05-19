@@ -1,19 +1,18 @@
 # 利用手順
 
-このファイルは、SqlTestSupport を既存の MSTest プロジェクトへ導入し、SQL 検証・正規化・Mock DB 分岐を使い始めるための手順を 1 つにまとめたものです。
+このファイルは、SqlTestSupport を既存の MSTest プロジェクトへ導入し、SQL 構文検証と Mock DB 分岐を使い始めるための手順を 1 つにまとめたものです。
 
 ## 前提
 
 - .NET 9 の MSTest プロジェクト
 - SQL Server 2022 向け T-SQL
-- 本番コードの SQL 実行メソッドは、第一引数に SQL 文字列を受け取る
+- 本番コードの SQL 実行メソッドは、最終的に第一引数に SQL 文字列を受け取る
 - テストでは本番 DB クラスを継承し、SQL 実行メソッドだけを override できる
+- 本番 DB メソッドの戻り値は主に `object?` または独自コレクション型
 
-検証は SQL Server への接続を行いません。ScriptDom で文法を検証し、正規化前後の AST fingerprint が一致する場合だけ正規化 SQL を返します。
+検証は SQL Server への接続を行いません。ScriptDom で文法を検証し、Mock 分岐に必要な metadata を AST から抽出します。正規化は行いません。
 
 ## 1. 導入方法を選ぶ
-
-通常は A を選びます。既存プロジェクトにファイルを増やしたくない場合だけ B を使います。
 
 ### A. 生成済み C# ファイルを追加する
 
@@ -33,11 +32,6 @@
 ### B. ビルド時に自動展開する
 
 `dist/SqlTestSupport.Directory.Build.targets` を、導入先テストプロジェクトと同じディレクトリへ `Directory.Build.targets` という名前で配置します。
-
-```text
-dist/SqlTestSupport.Directory.Build.targets
-  -> /path/to/test-project/Directory.Build.targets
-```
 
 既存の `Directory.Build.targets` がある場合は上書きせず、`SqlTestSupport.Directory.Build.targets` という名前で配置し、既存ファイルから import します。
 
@@ -69,17 +63,14 @@ dotnet run -- /path/to/test-project/SqlTestSupport
 
 ## 2. 独自 Assert クラスに forwarding method を追加する
 
-テストコードからは `Assert.IsValidSql(sql)` と `Assert.NormalizeSql(sql)` で呼べる形にします。
+テストコードからは `Assert.IsValidSql(sql)` で呼べる形にします。
 
 ```csharp
 public static void IsValidSql(string sql, string? message = null)
     => SqlAssertFacade.IsValidSql(sql, message);
-
-public static string NormalizeSql(string sql, string? message = null)
-    => SqlAssertFacade.NormalizeSql(sql, message);
 ```
 
-これにより、構文不正や正規化前後の AST fingerprint 不一致は MSTest の `AssertFailedException` として失敗します。
+構文不正は MSTest の `AssertFailedException` として失敗します。メッセージには SQL Server 2022 固定で検証したこと、ScriptDom の parse error、対象 SQL が含まれます。
 
 ## 3. SQL 文字列を直接検証する
 
@@ -97,20 +88,11 @@ public void Customer_select_sql_is_valid()
 }
 ```
 
-正規化済み SQL を使いたい場合:
+使いどころ:
 
-```csharp
-[TestMethod]
-public void Seed_customer()
-{
-    var sql = Assert.NormalizeSql("""
-        insert into dbo.Customers (Id, Name)
-        values (1, N'Alice')
-        """);
-
-    ExecuteSql(sql);
-}
-```
+- テストデータ作成 SQL の文法確認
+- helper 内に置いた SQL literal の文法確認
+- DB Mock を通らない SQL の軽い構文確認
 
 ## 4. Mock DB を作る
 
@@ -119,19 +101,20 @@ public void Seed_customer()
 ```csharp
 public class AppDb
 {
-    public virtual int Execute(string sql, object? parameters = null)
+    public virtual object? Execute(string sql, object? parameters = null)
     {
         throw new NotImplementedException();
     }
 
-    public virtual T Scalar<T>(string sql, object? parameters = null)
+    public virtual CustomerRows QueryRows(string sql, object? parameters = null)
     {
         throw new NotImplementedException();
     }
 
-    public virtual void ExecuteCommand(string sql, object? parameters = null)
+    public virtual object? get_value(string columns, string table, string where)
     {
-        throw new NotImplementedException();
+        var sql = $"SELECT {columns} FROM {table} WHERE {where}";
+        return Execute(sql);
     }
 }
 ```
@@ -143,38 +126,37 @@ public sealed class MockAppDb : AppDb
 {
     private readonly SqlMockRouter _router = new();
 
+    public IReadOnlyList<SqlInvocation> History => _router.History;
+
     public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
         => _router.WhenSql(predicate);
 
     public void VerifyAllSqlExpectations()
         => _router.VerifyAll();
 
-    public override int Execute(string sql, object? parameters = null)
-        => _router.ExecuteNonQuery(sql);
+    public override object? Execute(string sql, object? parameters = null)
+        => _router.ExecuteResult<object?>(sql);
 
-    public override T Scalar<T>(string sql, object? parameters = null)
-        => _router.Scalar<T>(sql);
-
-    public override void ExecuteCommand(string sql, object? parameters = null)
-        => _router.ExecuteCommand(sql);
+    public override CustomerRows QueryRows(string sql, object? parameters = null)
+        => _router.ExecuteResult<CustomerRows>(sql);
 }
 ```
 
-この形にすると、テスト対象メソッドが実行した SQL はすべて validate / normalize / inspect されます。
+`get_value` が上の例のように virtual な `Execute(sql)` を呼ぶなら、`get_value` 自体を override しなくても Mock 側の `Execute` が呼ばれます。内部で非 virtual 実行メソッドを直接呼ぶ場合は、Mock DB で `get_value` も override し、組み立て後 SQL を `_router.ExecuteResult<object?>(sql)` に渡します。
 
 ## 5. Mock の振る舞いを登録する
 
-`WhenSql` には、正規化・解析済みの `SqlInvocation` が渡されます。SQL 文字列の部分一致より、AST metadata を使った条件を優先します。
+`WhenSql` には、構文解析済みの `SqlInvocation` が渡されます。SQL 文字列の部分一致より、AST metadata を使った条件を優先します。
 
 ```csharp
 db.WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.WhereUses("Id"))
-  .ReturnsScalar("Alice");
+  .ReturnsResult("Alice");
 
-db.WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id"))
-  .ReturnsAffectedRows(1);
-
-db.WhenSql(q => q.IsInsertInto("dbo.AuditLogs"))
-  .Completes();
+db.WhenSql(q =>
+      q.IsSelectFrom("dbo.Customers") &&
+      q.JoinsTable("dbo.Orders") &&
+      q.OrdersBy("Id"))
+  .ReturnsResult(new CustomerRows());
 ```
 
 主な matcher:
@@ -188,215 +170,148 @@ q.WhereUses("Id")
 q.SelectsColumn("Name")
 q.ReferencesTable("dbo.Customers")
 q.TargetsTable("dbo.Customers")
+q.JoinsTable("dbo.Orders")
+q.OrdersBy("CreatedAt")
+q.GroupsBy("CustomerId")
+q.HavingUses("Id")
+q.HavingCalls("COUNT")
 q.HasParameter("@Id")
 ```
 
-## 6. テストメソッドで使う
+複数 rule が一致し得る場合は、より具体的な rule を先に登録します。router は登録順に最初に一致した rule を使います。
 
-Scalar 値を返す SQL:
+## 6. SQL の内容に応じて同じ関数の振る舞いを変える
+
+同じ `Execute(sql)` でも、SQL 形状で戻り値を分岐できます。
 
 ```csharp
-[TestMethod]
-public void Get_customer_name_returns_name()
-{
-    var db = new MockAppDb();
-    db.WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.WhereUses("Id"))
-      .ReturnsScalar("Alice");
+db.WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.WhereUses("Id"))
+  .ReturnsResult("Alice");
 
-    var service = new CustomerService(db);
-
-    var name = service.GetCustomerName(1);
-
-    Assert.AreEqual("Alice", name);
-    db.VerifyAllSqlExpectations();
-}
+db.WhenSql(q => q.IsSelectFrom("dbo.Settings") && q.WhereUses("Key"))
+  .ReturnsResult("Enabled");
 ```
 
-更新件数を返す SQL:
+`get_value("Name", "dbo.Customers", "Id = @Id")` のようなメソッドでも、最終的に組み立てられた SQL が router に渡れば同じ matcher を使えます。
 
 ```csharp
-[TestMethod]
-public void Rename_customer_updates_customer()
-{
-    var db = new MockAppDb();
-    db.WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id"))
-      .ReturnsAffectedRows(1);
-
-    var service = new CustomerService(db);
-
-    var updated = service.RenameCustomer(1, "Alice");
-
-    Assert.IsTrue(updated);
-    db.VerifyAllSqlExpectations();
-}
-```
-
-戻り値なし command:
-
-```csharp
-[TestMethod]
-public void Save_customer_writes_audit_log()
-{
-    var db = new MockAppDb();
-    db.WhenSql(q => q.IsInsertInto("dbo.AuditLogs"))
-      .Completes();
-
-    var service = new CustomerService(db);
-
-    service.SaveCustomer(1, "Alice");
-
-    db.VerifyAllSqlExpectations();
-}
+db.WhenSql(q =>
+      q.IsSelectFrom("dbo.Customers") &&
+      q.SelectsColumn("Name") &&
+      q.WhereUses("Id"))
+  .ReturnsResult("Alice");
 ```
 
 ## 7. Mock 振る舞いなしで構文だけ確認する
 
-テスト対象メソッド内で実行される SQL の構文エラーだけを確認したい場合は、基本的に `WhenSql(...)` を登録しません。SQL は `SqlMockRouter` に渡った時点で必ず validate / normalize / inspect されるため、構文不正があればテスト対象メソッドの実行中に `AssertFailedException` で失敗します。
+テスト対象メソッド内で実行される SQL の構文エラーだけを確認したい場合は、基本的に `WhenSql(...)` を登録しません。SQL は `SqlMockRouter` に渡った時点で必ず validate / inspect されるため、構文不正があれば `AssertFailedException` で失敗します。
 
-### 戻り値なし実行メソッドだけの場合
+### 戻り値が `object?` の実行メソッド
 
-戻り値なしの `ExecuteCommand(sql)` だけを使うテスト対象なら、Mock DB を作ってテスト対象メソッドを実行するだけです。下の例では、少なくとも 1 つの SQL が通ったことを確認するために `History` を公開しています。
-
-```csharp
-[TestMethod]
-public void Save_customer_sql_has_no_syntax_error()
-{
-    var db = new MockAppDb();
-    var service = new CustomerService(db);
-
-    service.SaveCustomer(1, "Alice");
-
-    Assert.IsGreaterThan(0, db.History.Count);
-}
-```
-
-この用途では `WhenSql(...).Completes()` も `VerifyAllSqlExpectations()` も不要です。未登録の `ExecuteCommand` は、構文解析・正規化・履歴記録だけ行って成功します。
-
-`History` は Mock DB から router の `History` をそのまま公開します。
-
-```csharp
-public sealed class MockAppDb : AppDb
-{
-    private readonly SqlMockRouter _router = new();
-
-    public IReadOnlyList<SqlInvocation> History => _router.History;
-
-    public override void ExecuteCommand(string sql, object? parameters = null)
-        => _router.ExecuteCommand(sql);
-}
-```
-
-### 戻り値のある実行メソッドがある場合
-
-戻り値が必要なメソッドは、テスト対象メソッドを最後まで進めるためのダミー値を返します。構文解析は rule matching より前に必ず実行されるため、`WhenSql(_ => true)` のような広い rule を使っても構文検証はスキップされません。
-
-scalar 戻り値のダミー:
+未登録 SQL は構文解析後に `null` を返します。
 
 ```csharp
 [TestMethod]
 public void Get_customer_name_sql_has_no_syntax_error()
 {
     var db = new MockAppDb();
-    db.WhenSql(_ => true)
-      .ReturnsScalar("dummy");
-
     var service = new CustomerService(db);
 
     service.GetCustomerName(1);
+
+    Assert.IsGreaterThan(0, db.History.Count);
 }
 ```
 
-更新件数のダミー:
+テスト対象を最後まで進めるために具体値が必要な場合は、広い rule でダミーを返します。
+
+```csharp
+db.WhenSql(_ => true)
+  .ReturnsResult("dummy");
+```
+
+### 戻り値が独自コレクション型の実行メソッド
+
+`Dictionary` 継承または `IDictionary<TKey,TValue>` 実装の具象クラスで、public parameterless constructor がある場合は、未登録 SQL に対して空の `new()` を返します。
+
+```csharp
+public sealed class CustomerRows : Dictionary<string, object?>
+{
+}
+```
 
 ```csharp
 [TestMethod]
-public void Rename_customer_sql_has_no_syntax_error()
+public void Search_customer_sql_has_no_syntax_error()
 {
     var db = new MockAppDb();
-    db.WhenSql(_ => true)
-      .ReturnsAffectedRows(1);
-
     var service = new CustomerService(db);
 
-    service.RenameCustomer(1, "Alice");
+    var rows = service.SearchCustomers();
+
+    Assert.IsEmpty(rows);
 }
 ```
 
-複数回呼ばれる場合は sequence を使います。
+### 戻り値を安全に決められない型
+
+`int` などの非 nullable value type は未登録 SQL では失敗します。今回の想定プロダクションコードでは使っていないため、更新件数専用 API は提供していません。必要な場合は `object?` 戻り値に寄せるか、明示的な rule で値を返します。
 
 ```csharp
 db.WhenSql(_ => true)
-  .ReturnsScalarSequence("Alice", "Bob");
-
-db.WhenSql(_ => true)
-  .ReturnsAffectedRowsSequence(1, 1, 0);
+  .ReturnsResult(1);
 ```
 
-nullable scalar の戻り値が `null` でよい場合は、未登録のままでも構文解析後に `null` が返ります。
-
-```csharp
-int? parentId = db.Scalar<int?>("""
-    SELECT ParentCustomerId
-    FROM dbo.Customers
-    WHERE Id = @Id
-    """);
-```
-
-`VerifyAllSqlExpectations()` は、登録した rule が本当に呼ばれたことも確認したい場合だけ呼びます。構文確認だけが目的なら必須ではありません。
-
-## 8. 未登録 SQL の既定動作
-
-`new SqlMockRouter()` の既定動作は、未登録 SQL でも安全に返せる範囲だけ fallback します。
-
-| 呼び出し | 未登録 SQL の既定動作 |
-| --- | --- |
-| `ExecuteCommand(sql)` | 構文解析・正規化・履歴記録だけ行って成功 |
-| `Scalar<int?>(sql)` | 構文解析・正規化・履歴記録後に `null` を返す |
-| `Scalar<string?>(sql)` | 構文解析・正規化・履歴記録後に `null` を返す |
-| `Scalar<int>(sql)` | 返す値を決められないため失敗 |
-| `ExecuteNonQuery(sql)` | affected rows を決められないため失敗 |
-
-reference type の scalar は、C# の nullable annotation を実行時に厳密判定しないため null 返却可能な型として扱います。
-
-すべての未登録 SQL を失敗させたい場合:
-
-```csharp
-private readonly SqlMockRouter _router =
-    new(UnmatchedSqlBehavior.Strict);
-```
-
-戻り値なし command だけを未登録許可し、nullable scalar は未登録時に失敗させたい場合:
-
-```csharp
-private readonly SqlMockRouter _router =
-    new(UnmatchedSqlBehavior.ValidateOnlyForCommands);
-```
-
-## 9. 同じ SQL 分類が複数回呼ばれる場合
+## 8. 同じ分類の SQL が複数回呼ばれる場合
 
 同じ matcher に複数回一致する場合は sequence を使います。
 
 ```csharp
 db.WhenSql(q => q.IsSelectFrom("dbo.Jobs") && q.WhereUses("Id"))
-  .ReturnsScalarSequence("Pending", "Ready");
+  .ReturnsResultSequence("Pending", "Ready");
 ```
 
-1 回目は `Pending`、2 回目は `Ready` を返します。sequence を使い切った後の追加呼び出しは失敗します。
+1 回目は `Pending`、2 回目は `Ready` を返します。sequence を使い切った後の追加呼び出しは失敗します。これは「想定より多く SQL が呼ばれた」ことを検出するためです。
 
-更新件数も同じ考え方です。
+## 9. VerifyAll と Completes
+
+`VerifyAllSqlExpectations()` は、登録した `WhenSql` rule が少なくとも 1 回呼ばれたことを検証します。登録した Mock 振る舞いが本当に使われたことまで確認したいテストで呼びます。
 
 ```csharp
-db.WhenSql(q => q.IsUpdate("dbo.Customers"))
-  .ReturnsAffectedRowsSequence(0, 1);
+db.WhenSql(q => q.IsSelectFrom("dbo.Customers"))
+  .ReturnsResult("Alice");
+
+var name = service.GetCustomerName(1);
+
+Assert.AreEqual("Alice", name);
+db.VerifyAllSqlExpectations();
 ```
 
-## 10. 何を検証するか
+構文確認だけが目的で `WhenSql` を登録していない場合、`VerifyAllSqlExpectations()` は必須ではありません。
+
+`Completes()` は廃止しています。本番コードに戻り値なし SQL 実行メソッドがない前提に合わせ、API を `ExecuteResult<T>` と `ReturnsResult` に整理しています。
+
+## 10. 未登録 SQL の既定動作
+
+`new SqlMockRouter()` の既定動作は、未登録 SQL でも安全に返せる範囲だけ fallback します。
+
+| 戻り値型 | 未登録 SQL の既定動作 |
+| --- | --- |
+| `object?` | 構文解析・履歴記録後に `null` を返す |
+| nullable value type | 構文解析・履歴記録後に `null` を返す |
+| reference type | 構文解析・履歴記録後に `null` を返す |
+| `Dictionary` 継承の具象クラス | 構文解析・履歴記録後に空の `new()` を返す |
+| `IDictionary<TKey,TValue>` 実装の具象クラス | 構文解析・履歴記録後に空の `new()` を返す |
+| `int` などの非 nullable value type | 返す値を決められないため失敗 |
+
+C# の nullable annotation は実行時に厳密判定できないため、reference type は null 返却可能な型として扱います。テスト対象が null を受け取れない場合は `WhenSql(...).ReturnsResult(...)` で明示値を返します。
+
+## 11. 何を検証するか
 
 検証するもの:
 
 - SQL Server 2022 / ScriptDom `TSql160Parser` で parse できるか
 - `GO` を含まない single batch command text か
-- 正規化前後の AST fingerprint が一致するか
 - Mock 分岐に使う statement kind、table、column、parameter metadata
 
 検証しないもの:
@@ -408,7 +323,7 @@ db.WhenSql(q => q.IsUpdate("dbo.Customers"))
 
 `EXEC(N'SELECT FROM WHERE')` のような動的 SQL は、外側の `EXEC(...)` が valid なら通ります。内部文字列も検証したい場合は、その文字列を別途 `Assert.IsValidSql` に渡します。
 
-## 11. 導入後の確認
+## 12. 導入後の確認
 
 導入先で確認すること:
 
@@ -419,23 +334,3 @@ db.WhenSql(q => q.IsUpdate("dbo.Customers"))
 - 未登録 SQL の既定動作がプロジェクトのテスト方針に合っている
 
 導入先でも SqlTestSupport の自己検証を実行したい場合は、`dist/SqlTestSupport.Tests.cs` を追加して `dotnet test` を実行します。
-
-## 12. よくある調整
-
-既存 DB クラスに `Execute(string sql, object? parameters = null)` 以外の overload がある場合でも、最終的に第一引数の SQL 文字列が共通実行メソッドへ渡るなら、その境界だけを override します。
-
-```csharp
-public override int Execute(string sql, object? parameters = null, int timeoutSeconds = 30)
-    => _router.ExecuteNonQuery(sql);
-```
-
-SQL 形状だけでは分岐しづらい場合は、escape hatch として `NormalizedSql` を使えます。
-
-```csharp
-db.WhenSql(q =>
-    q.IsSelectFrom("dbo.Customers") &&
-    q.NormalizedSql.Contains("WITH (UPDLOCK)", StringComparison.OrdinalIgnoreCase))
-  .ReturnsScalar("Alice");
-```
-
-ただし、標準の分岐面は `StatementKind`、`TargetTables`、`ReferencedTables`、`SelectedColumns`、`WhereColumns`、`ParameterNames` に寄せます。

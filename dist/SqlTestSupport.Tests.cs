@@ -1,4 +1,5 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Collections;
 
 namespace SqlTestSupport.Tests
 {
@@ -18,24 +19,13 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void IsValidSql_throws_assert_failed_for_invalid_sql()
         {
-            // test-facing API は低レベル例外を AssertFailedException に変換する。
+            // test-facing API は低レベル例外を日本語の AssertFailedException に変換する。
             var exception = Assert.Throws<AssertFailedException>(() =>
-                SqlAssertFacade.IsValidSql("SELECT FROM WHERE", "Custom SQL failed."));
+                SqlAssertFacade.IsValidSql("SELECT FROM WHERE", "SQL の検証に失敗しました。"));
 
-            Assert.IsTrue(exception.Message.Contains("Custom SQL failed.", StringComparison.Ordinal));
-            Assert.IsTrue(exception.Message.Contains("Parse errors:", StringComparison.Ordinal));
-        }
-
-        [TestMethod]
-        public void NormalizeSql_returns_normalized_sql()
-        {
-            // 呼び出し側は正規化済み SQL を string として受け取れる。
-            var normalized = SqlAssertFacade.NormalizeSql("""
-                select Id
-                from dbo.Customers
-                """);
-
-            Assert.IsTrue(normalized.Contains("SELECT", StringComparison.Ordinal));
+            Assert.IsTrue(exception.Message.Contains("SQL の検証に失敗しました。", StringComparison.Ordinal));
+            Assert.IsTrue(exception.Message.Contains("構文解析エラー:", StringComparison.Ordinal));
+            Assert.IsTrue(exception.Message.Contains("対象 SQL:", StringComparison.Ordinal));
         }
     }
 
@@ -47,60 +37,78 @@ namespace SqlTestSupport.Tests
         {
             // 本番DBクラスの第一引数 SQL 実行メソッドだけを override すれば Mock 化できる。
             var db = new MockProductionDb();
-            db.WhenSql(q => q.IsSelectFrom("dbo.Customers")).ReturnsScalar("Alice");
-            db.WhenSql(q => q.IsUpdate("dbo.Customers")).ReturnsAffectedRows(1);
+            db.WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.SelectsColumn("Name"))
+                .ReturnsResult("Alice");
 
-            var name = db.Scalar<string>("SELECT Name FROM dbo.Customers");
-            var affectedRows = db.Execute("""
-                UPDATE dbo.Customers
-                SET Name = @Name
-                WHERE Id = @Id
-                """);
+            var name = db.Execute("SELECT Name FROM dbo.Customers");
 
             Assert.AreEqual("Alice", name);
-            Assert.AreEqual(1, affectedRows);
             db.VerifyAllSqlExpectations();
         }
 
         [TestMethod]
-        public void Mock_db_can_override_void_sql_argument_method()
+        public void Mock_db_can_validate_unregistered_object_result_sql_without_mock_behavior()
         {
-            // 戻り値なし本番メソッドも第一引数 SQL を router に渡して検証できる。
-            var db = new MockVoidProductionDb();
-            db.WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id")).Completes();
+            // object? 戻り値の未登録 SQL は構文解析と履歴記録だけ行い null を返す。
+            var db = new MockProductionDb();
 
-            db.Execute("""
-                UPDATE dbo.Customers
-                SET Name = @Name
+            var value = db.Execute("""
+                SELECT MiddleName
+                FROM dbo.Customers
                 WHERE Id = @Id
                 """);
 
-            db.VerifyAllSqlExpectations();
+            Assert.IsNull(value);
+            Assert.HasCount(1, db.History);
+            Assert.IsTrue(db.History[0].WhereUses("Id"));
         }
 
         [TestMethod]
-        public void Mock_db_can_validate_unregistered_void_sql_without_mock_behavior()
+        public void Mock_db_returns_empty_collection_for_unregistered_dictionary_result()
         {
-            // 既定の Mock DB は未登録 void SQL を構文解析だけで通せる。
-            var db = new MockVoidProductionDb();
+            // 独自コレクション戻り値の未登録 SQL は空の new() を返す。
+            var db = new MockProductionDb();
 
-            db.Execute("""
-                UPDATE dbo.Customers
-                SET Name = @Name
-                WHERE Id = @Id
+            var rows = db.QueryRows("""
+                SELECT Id, Name
+                FROM dbo.Customers
                 """);
 
+            Assert.IsEmpty(rows);
+            Assert.HasCount(1, db.History);
+        }
+
+        [TestMethod]
+        public void Mock_db_can_branch_get_value_by_constructed_sql_metadata()
+        {
+            // get_value のように内部で SQL を組み立てるメソッドも、組み立て後 SQL を解析して分岐できる。
+            var db = new MockProductionDb();
+            db.WhenSql(q =>
+                    q.IsSelectFrom("dbo.Customers") &&
+                    q.SelectsColumn("Name") &&
+                    q.WhereUses("Id"))
+                .ReturnsResult("Alice");
+
+            var name = db.get_value("Name", "dbo.Customers", "Id = @Id");
+
+            Assert.AreEqual("Alice", name);
             db.VerifyAllSqlExpectations();
         }
 
         private class ProductionDb
         {
             // 導入先の本番DBクラスを最小化した形。
-            public virtual int Execute(string sql, object? parameters = null)
+            public virtual object? Execute(string sql, object? parameters = null)
                 => throw new NotSupportedException(sql);
 
-            public virtual T Scalar<T>(string sql, object? parameters = null)
+            public virtual CustomerRows QueryRows(string sql, object? parameters = null)
                 => throw new NotSupportedException(sql);
+
+            public virtual object? get_value(string columns, string table, string where)
+            {
+                var sql = $"SELECT {columns} FROM {table} WHERE {where}";
+                return Execute(sql);
+            }
         }
 
         private sealed class MockProductionDb : ProductionDb
@@ -108,35 +116,7 @@ namespace SqlTestSupport.Tests
             private readonly SqlMockRouter _router = new();
 
             // Mock DB は router の薄い facade に留める。
-            public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
-                => _router.WhenSql(predicate);
-
-            public void VerifyAllSqlExpectations()
-                => _router.VerifyAll();
-
-            public override int Execute(string sql, object? parameters = null)
-                => _router.ExecuteNonQuery(sql);
-
-            public override T Scalar<T>(string sql, object? parameters = null)
-                => _router.Scalar<T>(sql);
-        }
-
-        private class VoidProductionDb
-        {
-            public virtual void Execute(string sql, object? parameters = null)
-                => throw new NotSupportedException(sql);
-        }
-
-        private sealed class MockVoidProductionDb : VoidProductionDb
-        {
-            private readonly SqlMockRouter _router;
-
-            public MockVoidProductionDb(
-                UnmatchedSqlBehavior unmatchedSqlBehavior =
-                    UnmatchedSqlBehavior.ReturnNullForNullableScalarsAndValidateOnlyForCommands)
-            {
-                _router = new SqlMockRouter(unmatchedSqlBehavior);
-            }
+            public IReadOnlyList<SqlInvocation> History => _router.History;
 
             public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
                 => _router.WhenSql(predicate);
@@ -144,8 +124,15 @@ namespace SqlTestSupport.Tests
             public void VerifyAllSqlExpectations()
                 => _router.VerifyAll();
 
-            public override void Execute(string sql, object? parameters = null)
-                => _router.ExecuteCommand(sql);
+            public override object? Execute(string sql, object? parameters = null)
+                => _router.ExecuteResult<object?>(sql);
+
+            public override CustomerRows QueryRows(string sql, object? parameters = null)
+                => _router.ExecuteResult<CustomerRows>(sql);
+        }
+
+        private sealed class CustomerRows : Dictionary<string, object?>
+        {
         }
     }
 
@@ -153,15 +140,15 @@ namespace SqlTestSupport.Tests
     public sealed class SqlMockRouterTests
     {
         [TestMethod]
-        public void Scalar_returns_registered_value_for_matching_select()
+        public void ExecuteResult_returns_registered_value_for_matching_select()
         {
-            // SELECT 形状に一致した rule は scalar 戻り値を返す。
+            // SELECT 形状に一致した rule は登録済みの戻り値を返す。
             var router = new SqlMockRouter();
             router
                 .WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.WhereUses("Id"))
-                .ReturnsScalar("Alice");
+                .ReturnsResult("Alice");
 
-            var value = router.Scalar<string>("""
+            var value = router.ExecuteResult<string>("""
                 SELECT Name
                 FROM dbo.Customers
                 WHERE Id = @Id
@@ -172,13 +159,13 @@ namespace SqlTestSupport.Tests
         }
 
         [TestMethod]
-        public void Scalar_returns_null_for_matching_nullable_scalar_without_configured_return()
+        public void ExecuteResult_returns_null_for_matching_nullable_result_without_configured_return()
         {
-            // nullable 戻り値の scalar は戻り値指定を省略した場合 null を返す。
+            // nullable 戻り値は rule に一致しても戻り値指定を省略できる。
             var router = new SqlMockRouter();
             router.WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.WhereUses("Id"));
 
-            var value = router.Scalar<int?>("""
+            var value = router.ExecuteResult<int?>("""
                 SELECT ParentCustomerId
                 FROM dbo.Customers
                 WHERE Id = @Id
@@ -189,227 +176,137 @@ namespace SqlTestSupport.Tests
         }
 
         [TestMethod]
-        public void Scalar_rejects_matching_non_nullable_scalar_without_configured_return()
+        public void ExecuteResult_returns_null_for_unregistered_object_result()
         {
-            // non-nullable 戻り値の scalar は引き続き戻り値指定を必須にする。
-            var router = new SqlMockRouter();
-            router.WhenSql(q => q.IsSelectFrom("dbo.Customers"));
-
-            Assert.Throws<AssertFailedException>(() =>
-                router.Scalar<int>("""
-                    SELECT COUNT(1)
-                    FROM dbo.Customers
-                    """));
-        }
-
-        [TestMethod]
-        public void ExecuteNonQuery_returns_registered_affected_rows_for_matching_update()
-        {
-            // UPDATE 形状に一致した rule は affected rows を返す。
-            var router = new SqlMockRouter();
-            router
-                .WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id"))
-                .ReturnsAffectedRows(1);
-
-            var affectedRows = router.ExecuteNonQuery("""
-                UPDATE dbo.Customers
-                SET Name = @Name
-                WHERE Id = @Id
-                """);
-
-            Assert.AreEqual(1, affectedRows);
-            router.VerifyAll();
-        }
-
-        [TestMethod]
-        public void ExecuteCommand_completes_for_matching_void_command()
-        {
-            // 戻り値なし実行は Completes rule に一致した場合だけ成功する。
-            var router = new SqlMockRouter();
-            router
-                .WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id"))
-                .Completes();
-
-            router.ExecuteCommand("""
-                UPDATE dbo.Customers
-                SET Name = @Name
-                WHERE Id = @Id
-                """);
-
-            router.VerifyAll();
-        }
-
-        [TestMethod]
-        public void ExecuteCommand_rejects_rule_that_returns_affected_rows()
-        {
-            // void 実行には Completes rule を明示し、affected rows rule は流用しない。
-            var router = new SqlMockRouter();
-            router
-                .WhenSql(q => q.IsUpdate("dbo.Customers"))
-                .ReturnsAffectedRows(1);
-
-            Assert.Throws<AssertFailedException>(() =>
-                router.ExecuteCommand("""
-                    UPDATE dbo.Customers
-                    SET Name = @Name
-                    WHERE Id = @Id
-                    """));
-        }
-
-        [TestMethod]
-        public void ExecuteCommand_default_accepts_unregistered_valid_sql()
-        {
-            // 既定では未登録の戻り値なし SQL を解析・履歴記録だけで通す。
+            // 未登録 SQL でも object? 戻り値なら構文解析後に null を返す。
             var router = new SqlMockRouter();
 
-            router.ExecuteCommand("""
-                UPDATE dbo.Customers
-                SET Name = @Name
-                WHERE Id = @Id
-                """);
-
-            Assert.HasCount(1, router.History);
-            Assert.AreEqual(DbCallMethod.Command, router.History[0].Method);
-            Assert.IsTrue(router.History[0].IsUpdate("dbo.Customers"));
-        }
-
-        [TestMethod]
-        public void ExecuteCommand_strict_mode_rejects_unregistered_sql()
-        {
-            // strict mode を明示した場合は未登録の戻り値なし SQL も失敗する。
-            var router = new SqlMockRouter(UnmatchedSqlBehavior.Strict);
-
-            Assert.Throws<AssertFailedException>(() =>
-                router.ExecuteCommand("""
-                    UPDATE dbo.Customers
-                    SET Name = @Name
-                    WHERE Id = @Id
-                    """));
-        }
-
-        [TestMethod]
-        public void ExecuteCommand_validate_only_mode_accepts_unregistered_valid_sql()
-        {
-            // validate-only mode では未登録の戻り値なし SQL を解析・履歴記録だけで通す。
-            var router = new SqlMockRouter(UnmatchedSqlBehavior.ValidateOnlyForCommands);
-
-            router.ExecuteCommand("""
-                UPDATE dbo.Customers
-                SET Name = @Name
-                WHERE Id = @Id
-                """);
-
-            Assert.HasCount(1, router.History);
-            Assert.AreEqual(DbCallMethod.Command, router.History[0].Method);
-            Assert.IsTrue(router.History[0].IsUpdate("dbo.Customers"));
-        }
-
-        [TestMethod]
-        public void ExecuteCommand_validate_only_mode_still_rejects_unregistered_invalid_sql()
-        {
-            // validate-only mode でも SQL 構文不正は失敗する。
-            var router = new SqlMockRouter(UnmatchedSqlBehavior.ValidateOnlyForCommands);
-
-            Assert.Throws<AssertFailedException>(() => router.ExecuteCommand("SELECT FROM WHERE"));
-        }
-
-        [TestMethod]
-        public void Scalar_validate_only_mode_still_rejects_unregistered_sql()
-        {
-            // 戻り値が必要な SQL は validate-only mode でも rule 登録必須。
-            var router = new SqlMockRouter(UnmatchedSqlBehavior.ValidateOnlyForCommands);
-
-            Assert.Throws<AssertFailedException>(() =>
-                router.Scalar<int>("""
-                    SELECT COUNT(1)
-                    FROM dbo.Customers
-                    """));
-        }
-
-        [TestMethod]
-        public void Scalar_default_returns_null_for_unregistered_nullable_sql()
-        {
-            // 既定では未登録でも nullable scalar なら検証後に null を返す。
-            var router = new SqlMockRouter();
-
-            var value = router.Scalar<int?>("""
-                SELECT ParentCustomerId
-                FROM dbo.Customers
-                WHERE Id = @Id
-                """);
-
-            Assert.IsNull(value);
-            Assert.HasCount(1, router.History);
-            Assert.AreEqual(DbCallMethod.Scalar, router.History[0].Method);
-        }
-
-        [TestMethod]
-        public void Scalar_default_returns_null_for_unregistered_reference_sql()
-        {
-            // reference type scalar は null 返却可能な型として扱う。
-            var router = new SqlMockRouter();
-
-            var value = router.Scalar<string?>("""
+            var value = router.ExecuteResult<object?>("""
                 SELECT MiddleName
                 FROM dbo.Customers
                 WHERE Id = @Id
                 """);
 
             Assert.IsNull(value);
+            Assert.HasCount(1, router.History);
+            Assert.IsTrue(router.History[0].IsSelectFrom("dbo.Customers"));
         }
 
         [TestMethod]
-        public void Scalar_strict_mode_rejects_unregistered_nullable_sql()
+        public void ExecuteResult_returns_empty_dictionary_subclass_for_unregistered_sql()
         {
-            // strict mode は nullable scalar でも未登録 SQL を失敗させる。
-            var router = new SqlMockRouter(UnmatchedSqlBehavior.Strict);
-
-            Assert.Throws<AssertFailedException>(() =>
-                router.Scalar<int?>("""
-                    SELECT ParentCustomerId
-                    FROM dbo.Customers
-                    WHERE Id = @Id
-                    """));
-        }
-
-        [TestMethod]
-        public void Router_rejects_unregistered_non_nullable_sql()
-        {
-            // 既定でも non-nullable scalar は返す値を決められないため失敗する。
+            // Dictionary 継承の独自コレクションは未登録でも空インスタンスを返す。
             var router = new SqlMockRouter();
 
-            Assert.Throws<AssertFailedException>(() =>
-                router.Scalar<int>("""
+            var rows = router.ExecuteResult<CustomerRows>("""
+                SELECT Id, Name
+                FROM dbo.Customers
+                WHERE IsActive = @IsActive
+                """);
+
+            Assert.IsEmpty(rows);
+            Assert.HasCount(1, router.History);
+        }
+
+        [TestMethod]
+        public void ExecuteResult_returns_empty_dictionary_implementation_for_unregistered_sql()
+        {
+            // IDictionary 実装の独自コレクションも空インスタンスを返す。
+            var router = new SqlMockRouter();
+
+            var rows = router.ExecuteResult<DictionaryBackedRows>("""
+                SELECT Id, Name
+                FROM dbo.Customers
+                """);
+
+            Assert.AreEqual(0, rows.Count);
+        }
+
+        [TestMethod]
+        public void ExecuteResult_rejects_unregistered_non_defaultable_result()
+        {
+            // int のように既定戻り値を安全に決められない型は登録必須にする。
+            var router = new SqlMockRouter();
+
+            var exception = Assert.Throws<AssertFailedException>(() =>
+                router.ExecuteResult<int>("""
                     SELECT COUNT(1)
                     FROM dbo.Customers
                     """));
+
+            Assert.IsTrue(exception.Message.Contains("未登録 SQL", StringComparison.Ordinal));
         }
 
         [TestMethod]
-        public void Router_rejects_invalid_sql_before_matching()
+        public void ExecuteResult_rejects_invalid_sql_before_matching()
         {
             // rule matching より先に SQL 構文検証を強制する。
             var router = new SqlMockRouter();
-            router.WhenSql(_ => true).ReturnsScalar(1);
+            router.WhenSql(_ => true).ReturnsResult(1);
 
-            Assert.Throws<AssertFailedException>(() =>
-                router.Scalar<int>("SELECT FROM WHERE"));
+            var exception = Assert.Throws<AssertFailedException>(() =>
+                router.ExecuteResult<int>("SELECT FROM WHERE"));
+
+            Assert.IsTrue(exception.Message.Contains("SQL mock が不正な SQL を受け取りました。", StringComparison.Ordinal));
         }
 
         [TestMethod]
-        public void Scalar_sequence_returns_values_in_order()
+        public void ExecuteResult_sequence_returns_values_in_order()
         {
             // sequence は同じ rule への呼び出し順に消費される。
             var router = new SqlMockRouter();
             router
                 .WhenSql(q => q.IsSelectFrom("dbo.Customers"))
-                .ReturnsScalarSequence("Alice", "Bob");
+                .ReturnsResultSequence("Alice", "Bob");
 
-            var first = router.Scalar<string>("SELECT Name FROM dbo.Customers");
-            var second = router.Scalar<string>("SELECT Name FROM dbo.Customers");
+            var first = router.ExecuteResult<string>("SELECT Name FROM dbo.Customers");
+            var second = router.ExecuteResult<string>("SELECT Name FROM dbo.Customers");
 
             Assert.AreEqual("Alice", first);
             Assert.AreEqual("Bob", second);
+        }
+
+        [TestMethod]
+        public void ExecuteResult_can_match_join_order_group_and_having_metadata()
+        {
+            // JOIN / GROUP BY / HAVING / ORDER BY の metadata で Mock 分岐できる。
+            var router = new SqlMockRouter();
+            router
+                .WhenSql(q =>
+                    q.IsSelectFrom("dbo.Customers") &&
+                    q.JoinsTable("dbo.Orders") &&
+                    q.GroupsBy("Id") &&
+                    q.HavingCalls("COUNT") &&
+                    q.OrdersBy("Id"))
+                .ReturnsResult("matched");
+
+            var value = router.ExecuteResult<string>("""
+                SELECT c.Id, COUNT(o.Id) AS OrderCount
+                FROM dbo.Customers AS c
+                INNER JOIN dbo.Orders AS o ON o.CustomerId = c.Id
+                GROUP BY c.Id
+                HAVING COUNT(o.Id) > 0
+                ORDER BY c.Id
+                """);
+
+            Assert.AreEqual("matched", value);
+        }
+
+        [TestMethod]
+        public void ExecuteResult_sequence_fails_when_exhausted()
+        {
+            // sequence は期待回数を表すため、余分な呼び出しは失敗する。
+            var router = new SqlMockRouter();
+            router
+                .WhenSql(q => q.IsSelectFrom("dbo.Customers"))
+                .ReturnsResultSequence("Alice");
+
+            _ = router.ExecuteResult<string>("SELECT Name FROM dbo.Customers");
+
+            var exception = Assert.Throws<AssertFailedException>(() =>
+                router.ExecuteResult<string>("SELECT Name FROM dbo.Customers"));
+
+            Assert.IsTrue(exception.Message.Contains("戻り値シーケンスを使い切りました", StringComparison.Ordinal));
         }
 
         [TestMethod]
@@ -417,9 +314,67 @@ namespace SqlTestSupport.Tests
         {
             // 登録した rule が未使用なら VerifyAll で検出する。
             var router = new SqlMockRouter();
-            router.WhenSql(q => q.IsSelectFrom("dbo.Customers")).ReturnsScalar("Alice");
+            router.WhenSql(q => q.IsSelectFrom("dbo.Customers")).ReturnsResult("Alice");
 
-            Assert.Throws<AssertFailedException>(() => router.VerifyAll());
+            var exception = Assert.Throws<AssertFailedException>(() => router.VerifyAll());
+
+            Assert.IsTrue(exception.Message.Contains("呼び出されていません", StringComparison.Ordinal));
+        }
+
+        private sealed class CustomerRows : Dictionary<string, object?>
+        {
+        }
+
+        private sealed class DictionaryBackedRows : IDictionary<string, object?>
+        {
+            private readonly Dictionary<string, object?> _inner = new();
+
+            public object? this[string key]
+            {
+                get => _inner[key];
+                set => _inner[key] = value;
+            }
+
+            public ICollection<string> Keys => _inner.Keys;
+
+            public ICollection<object?> Values => _inner.Values;
+
+            public int Count => _inner.Count;
+
+            public bool IsReadOnly => false;
+
+            public void Add(string key, object? value)
+                => _inner.Add(key, value);
+
+            public void Add(KeyValuePair<string, object?> item)
+                => ((ICollection<KeyValuePair<string, object?>>)_inner).Add(item);
+
+            public void Clear()
+                => _inner.Clear();
+
+            public bool Contains(KeyValuePair<string, object?> item)
+                => ((ICollection<KeyValuePair<string, object?>>)_inner).Contains(item);
+
+            public bool ContainsKey(string key)
+                => _inner.ContainsKey(key);
+
+            public void CopyTo(KeyValuePair<string, object?>[] array, int arrayIndex)
+                => ((ICollection<KeyValuePair<string, object?>>)_inner).CopyTo(array, arrayIndex);
+
+            public IEnumerator<KeyValuePair<string, object?>> GetEnumerator()
+                => _inner.GetEnumerator();
+
+            public bool Remove(string key)
+                => _inner.Remove(key);
+
+            public bool Remove(KeyValuePair<string, object?> item)
+                => ((ICollection<KeyValuePair<string, object?>>)_inner).Remove(item);
+
+            public bool TryGetValue(string key, out object? value)
+                => _inner.TryGetValue(key, out value);
+
+            IEnumerator IEnumerable.GetEnumerator()
+                => GetEnumerator();
         }
     }
 
@@ -431,14 +386,15 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Analyze_accepts_valid_sql_server_2022_tsql()
         {
-            // SQL Server 2022 として valid な SQL は fingerprint 付きで解析できる。
+            // SQL Server 2022 として valid な SQL は ScriptDom AST として解析できる。
             var result = _service.Analyze("""
                 SELECT Id, Name
                 FROM dbo.Customers
                 WHERE Id = @Id
                 """);
 
-            Assert.IsFalse(string.IsNullOrWhiteSpace(result.Fingerprint));
+            Assert.IsNotNull(result.Fragment);
+            Assert.IsTrue(result.OriginalSql.Contains("dbo.Customers", StringComparison.Ordinal));
         }
 
         [TestMethod]
@@ -449,21 +405,6 @@ namespace SqlTestSupport.Tests
                 _service.Analyze("SELECT FROM WHERE"));
 
             Assert.IsGreaterThan(0, exception.Diagnostics.Count);
-        }
-
-        [TestMethod]
-        public void Normalize_returns_sql_only_when_round_trip_fingerprint_matches()
-        {
-            // 正規化後 SQL は再 parse され、元 SQL と同じ fingerprint の場合だけ返る。
-            var result = _service.Normalize("""
-                select Id, Name
-                from dbo.Customers
-                where Id = @Id
-                """);
-
-            Assert.AreEqual(result.OriginalFingerprint, result.NormalizedFingerprint);
-            Assert.IsTrue(result.NormalizedSql.Contains("SELECT", StringComparison.Ordinal));
-            Assert.IsTrue(result.NormalizedSql.Contains("FROM", StringComparison.Ordinal));
         }
 
         [TestMethod]
@@ -497,6 +438,28 @@ namespace SqlTestSupport.Tests
             Assert.AreEqual(SqlStatementKind.Update, result.StatementKind);
             CollectionAssert.Contains(result.TargetTables.ToList(), "dbo.Customers");
             CollectionAssert.Contains(result.WhereColumns.ToList(), "Id");
+        }
+
+        [TestMethod]
+        public void Inspect_extracts_join_order_group_and_having_metadata()
+        {
+            // JOIN / ORDER BY / GROUP BY / HAVING も SQL 形状の分岐条件に使える。
+            var result = _service.Inspect("""
+                SELECT c.Id, COUNT(o.Id) AS OrderCount
+                FROM dbo.Customers AS c
+                INNER JOIN dbo.Orders AS o ON o.CustomerId = c.Id
+                WHERE c.IsActive = @IsActive
+                GROUP BY c.Id
+                HAVING COUNT(o.Id) > 0
+                ORDER BY c.Id
+                """);
+
+            CollectionAssert.Contains(result.ReferencedTables.ToList(), "dbo.Customers");
+            CollectionAssert.Contains(result.JoinedTables.ToList(), "dbo.Orders");
+            CollectionAssert.Contains(result.OrderByColumns.ToList(), "Id");
+            CollectionAssert.Contains(result.GroupByColumns.ToList(), "Id");
+            CollectionAssert.Contains(result.HavingColumns.ToList(), "Id");
+            CollectionAssert.Contains(result.HavingFunctions.ToList(), "COUNT");
         }
     }
 }

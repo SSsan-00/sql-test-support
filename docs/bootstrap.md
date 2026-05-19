@@ -24,8 +24,6 @@ dist/SqlTestSupport.Directory.Build.targets
 - assert facade
 - validation service
 - syntax analyzer
-- normalizer
-- AST fingerprinter
 - inspection service
 - mock router
 - models
@@ -178,14 +176,11 @@ SqlTestSupport.Directory.Build.targets
    <PackageReference Include="MSTest.TestFramework" Version="4.0.2" />
    ```
 
-3. 既存の独自 `Assert` クラスへ forwarding method を 2 つ追加する
+3. 既存の独自 `Assert` クラスへ forwarding method を追加する
 
    ```csharp
    public static void IsValidSql(string sql, string? message = null)
        => SqlAssertFacade.IsValidSql(sql, message);
-
-   public static string NormalizeSql(string sql, string? message = null)
-       => SqlAssertFacade.NormalizeSql(sql, message);
    ```
 
 4. 導入先で同じ仕様を検証したい場合は `dist/SqlTestSupport.Tests.cs` も追加する

@@ -1,19 +1,20 @@
 namespace SqlTestSupport
 {
-    // WhenSql predicate に渡す、検証・正規化・抽出済みの SQL 呼び出し情報。
+    // WhenSql predicate に渡す、検証・抽出済みの SQL 呼び出し情報。
     public sealed record SqlInvocation(
-        DbCallMethod Method,
         string OriginalSql,
-        string NormalizedSql,
-        string Fingerprint,
         SqlStatementKind StatementKind,
         IReadOnlySet<string> TargetTables,
         IReadOnlySet<string> ReferencedTables,
+        IReadOnlySet<string> JoinedTables,
         IReadOnlySet<string> SelectedColumns,
         IReadOnlySet<string> WhereColumns,
+        IReadOnlySet<string> OrderByColumns,
+        IReadOnlySet<string> GroupByColumns,
+        IReadOnlySet<string> HavingColumns,
+        IReadOnlySet<string> HavingFunctions,
         IReadOnlySet<string> ParameterNames,
-        int GlobalCallIndex,
-        int MethodCallIndex)
+        int CallIndex)
     {
         // テストコード側で SQL 形状を簡潔に表現する matcher。
         public bool IsSelectFrom(string table)
@@ -42,6 +43,21 @@ namespace SqlTestSupport
 
         public bool HasParameter(string parameterName)
             => ContainsIdentifier(ParameterNames, parameterName);
+
+        public bool JoinsTable(string table)
+            => ContainsIdentifier(JoinedTables, table);
+
+        public bool OrdersBy(string column)
+            => ContainsIdentifier(OrderByColumns, column);
+
+        public bool GroupsBy(string column)
+            => ContainsIdentifier(GroupByColumns, column);
+
+        public bool HavingUses(string column)
+            => ContainsIdentifier(HavingColumns, column);
+
+        public bool HavingCalls(string functionName)
+            => ContainsIdentifier(HavingFunctions, functionName);
 
         private static bool ContainsIdentifier(IReadOnlySet<string> values, string expected)
             // schema 付き・schema なしの両方を軽く許容。

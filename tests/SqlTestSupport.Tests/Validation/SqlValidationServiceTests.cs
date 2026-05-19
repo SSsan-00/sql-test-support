@@ -10,14 +10,15 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void Analyze_accepts_valid_sql_server_2022_tsql()
         {
-            // SQL Server 2022 として valid な SQL は fingerprint 付きで解析できる。
+            // SQL Server 2022 として valid な SQL は ScriptDom AST として解析できる。
             var result = _service.Analyze("""
                 SELECT Id, Name
                 FROM dbo.Customers
                 WHERE Id = @Id
                 """);
 
-            Assert.IsFalse(string.IsNullOrWhiteSpace(result.Fingerprint));
+            Assert.IsNotNull(result.Fragment);
+            Assert.IsTrue(result.OriginalSql.Contains("dbo.Customers", StringComparison.Ordinal));
         }
 
         [TestMethod]
@@ -28,21 +29,6 @@ namespace SqlTestSupport.Tests
                 _service.Analyze("SELECT FROM WHERE"));
 
             Assert.IsGreaterThan(0, exception.Diagnostics.Count);
-        }
-
-        [TestMethod]
-        public void Normalize_returns_sql_only_when_round_trip_fingerprint_matches()
-        {
-            // 正規化後 SQL は再 parse され、元 SQL と同じ fingerprint の場合だけ返る。
-            var result = _service.Normalize("""
-                select Id, Name
-                from dbo.Customers
-                where Id = @Id
-                """);
-
-            Assert.AreEqual(result.OriginalFingerprint, result.NormalizedFingerprint);
-            Assert.IsTrue(result.NormalizedSql.Contains("SELECT", StringComparison.Ordinal));
-            Assert.IsTrue(result.NormalizedSql.Contains("FROM", StringComparison.Ordinal));
         }
 
         [TestMethod]
@@ -76,6 +62,28 @@ namespace SqlTestSupport.Tests
             Assert.AreEqual(SqlStatementKind.Update, result.StatementKind);
             CollectionAssert.Contains(result.TargetTables.ToList(), "dbo.Customers");
             CollectionAssert.Contains(result.WhereColumns.ToList(), "Id");
+        }
+
+        [TestMethod]
+        public void Inspect_extracts_join_order_group_and_having_metadata()
+        {
+            // JOIN / ORDER BY / GROUP BY / HAVING も SQL 形状の分岐条件に使える。
+            var result = _service.Inspect("""
+                SELECT c.Id, COUNT(o.Id) AS OrderCount
+                FROM dbo.Customers AS c
+                INNER JOIN dbo.Orders AS o ON o.CustomerId = c.Id
+                WHERE c.IsActive = @IsActive
+                GROUP BY c.Id
+                HAVING COUNT(o.Id) > 0
+                ORDER BY c.Id
+                """);
+
+            CollectionAssert.Contains(result.ReferencedTables.ToList(), "dbo.Customers");
+            CollectionAssert.Contains(result.JoinedTables.ToList(), "dbo.Orders");
+            CollectionAssert.Contains(result.OrderByColumns.ToList(), "Id");
+            CollectionAssert.Contains(result.GroupByColumns.ToList(), "Id");
+            CollectionAssert.Contains(result.HavingColumns.ToList(), "Id");
+            CollectionAssert.Contains(result.HavingFunctions.ToList(), "COUNT");
         }
     }
 }

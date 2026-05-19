@@ -4,7 +4,7 @@ namespace SqlTestSupport
     public sealed class SqlSyntaxValidationException : SqlValidationException
     {
         public SqlSyntaxValidationException(string sql, IReadOnlyList<SqlParseDiagnostic> diagnostics)
-            : base("SQL syntax validation failed.", sql)
+            : base("SQL の構文検証に失敗しました。", sql)
         {
             Diagnostics = diagnostics;
         }

@@ -10,60 +10,78 @@ namespace SqlTestSupport.Tests
         {
             // 本番DBクラスの第一引数 SQL 実行メソッドだけを override すれば Mock 化できる。
             var db = new MockProductionDb();
-            db.WhenSql(q => q.IsSelectFrom("dbo.Customers")).ReturnsScalar("Alice");
-            db.WhenSql(q => q.IsUpdate("dbo.Customers")).ReturnsAffectedRows(1);
+            db.WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.SelectsColumn("Name"))
+                .ReturnsResult("Alice");
 
-            var name = db.Scalar<string>("SELECT Name FROM dbo.Customers");
-            var affectedRows = db.Execute("""
-                UPDATE dbo.Customers
-                SET Name = @Name
-                WHERE Id = @Id
-                """);
+            var name = db.Execute("SELECT Name FROM dbo.Customers");
 
             Assert.AreEqual("Alice", name);
-            Assert.AreEqual(1, affectedRows);
             db.VerifyAllSqlExpectations();
         }
 
         [TestMethod]
-        public void Mock_db_can_override_void_sql_argument_method()
+        public void Mock_db_can_validate_unregistered_object_result_sql_without_mock_behavior()
         {
-            // 戻り値なし本番メソッドも第一引数 SQL を router に渡して検証できる。
-            var db = new MockVoidProductionDb();
-            db.WhenSql(q => q.IsUpdate("dbo.Customers") && q.WhereUses("Id")).Completes();
+            // object? 戻り値の未登録 SQL は構文解析と履歴記録だけ行い null を返す。
+            var db = new MockProductionDb();
 
-            db.Execute("""
-                UPDATE dbo.Customers
-                SET Name = @Name
+            var value = db.Execute("""
+                SELECT MiddleName
+                FROM dbo.Customers
                 WHERE Id = @Id
                 """);
 
-            db.VerifyAllSqlExpectations();
+            Assert.IsNull(value);
+            Assert.HasCount(1, db.History);
+            Assert.IsTrue(db.History[0].WhereUses("Id"));
         }
 
         [TestMethod]
-        public void Mock_db_can_validate_unregistered_void_sql_without_mock_behavior()
+        public void Mock_db_returns_empty_collection_for_unregistered_dictionary_result()
         {
-            // 既定の Mock DB は未登録 void SQL を構文解析だけで通せる。
-            var db = new MockVoidProductionDb();
+            // 独自コレクション戻り値の未登録 SQL は空の new() を返す。
+            var db = new MockProductionDb();
 
-            db.Execute("""
-                UPDATE dbo.Customers
-                SET Name = @Name
-                WHERE Id = @Id
+            var rows = db.QueryRows("""
+                SELECT Id, Name
+                FROM dbo.Customers
                 """);
 
+            Assert.IsEmpty(rows);
+            Assert.HasCount(1, db.History);
+        }
+
+        [TestMethod]
+        public void Mock_db_can_branch_get_value_by_constructed_sql_metadata()
+        {
+            // get_value のように内部で SQL を組み立てるメソッドも、組み立て後 SQL を解析して分岐できる。
+            var db = new MockProductionDb();
+            db.WhenSql(q =>
+                    q.IsSelectFrom("dbo.Customers") &&
+                    q.SelectsColumn("Name") &&
+                    q.WhereUses("Id"))
+                .ReturnsResult("Alice");
+
+            var name = db.get_value("Name", "dbo.Customers", "Id = @Id");
+
+            Assert.AreEqual("Alice", name);
             db.VerifyAllSqlExpectations();
         }
 
         private class ProductionDb
         {
             // 導入先の本番DBクラスを最小化した形。
-            public virtual int Execute(string sql, object? parameters = null)
+            public virtual object? Execute(string sql, object? parameters = null)
                 => throw new NotSupportedException(sql);
 
-            public virtual T Scalar<T>(string sql, object? parameters = null)
+            public virtual CustomerRows QueryRows(string sql, object? parameters = null)
                 => throw new NotSupportedException(sql);
+
+            public virtual object? get_value(string columns, string table, string where)
+            {
+                var sql = $"SELECT {columns} FROM {table} WHERE {where}";
+                return Execute(sql);
+            }
         }
 
         private sealed class MockProductionDb : ProductionDb
@@ -71,35 +89,7 @@ namespace SqlTestSupport.Tests
             private readonly SqlMockRouter _router = new();
 
             // Mock DB は router の薄い facade に留める。
-            public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
-                => _router.WhenSql(predicate);
-
-            public void VerifyAllSqlExpectations()
-                => _router.VerifyAll();
-
-            public override int Execute(string sql, object? parameters = null)
-                => _router.ExecuteNonQuery(sql);
-
-            public override T Scalar<T>(string sql, object? parameters = null)
-                => _router.Scalar<T>(sql);
-        }
-
-        private class VoidProductionDb
-        {
-            public virtual void Execute(string sql, object? parameters = null)
-                => throw new NotSupportedException(sql);
-        }
-
-        private sealed class MockVoidProductionDb : VoidProductionDb
-        {
-            private readonly SqlMockRouter _router;
-
-            public MockVoidProductionDb(
-                UnmatchedSqlBehavior unmatchedSqlBehavior =
-                    UnmatchedSqlBehavior.ReturnNullForNullableScalarsAndValidateOnlyForCommands)
-            {
-                _router = new SqlMockRouter(unmatchedSqlBehavior);
-            }
+            public IReadOnlyList<SqlInvocation> History => _router.History;
 
             public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
                 => _router.WhenSql(predicate);
@@ -107,8 +97,15 @@ namespace SqlTestSupport.Tests
             public void VerifyAllSqlExpectations()
                 => _router.VerifyAll();
 
-            public override void Execute(string sql, object? parameters = null)
-                => _router.ExecuteCommand(sql);
+            public override object? Execute(string sql, object? parameters = null)
+                => _router.ExecuteResult<object?>(sql);
+
+            public override CustomerRows QueryRows(string sql, object? parameters = null)
+                => _router.ExecuteResult<CustomerRows>(sql);
+        }
+
+        private sealed class CustomerRows : Dictionary<string, object?>
+        {
         }
     }
 }

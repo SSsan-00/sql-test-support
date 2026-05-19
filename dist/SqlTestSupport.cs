@@ -1,11 +1,7 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using System.Collections.Concurrent;
 using System.Collections;
 using System.Globalization;
-using System.Reflection;
-using System.Runtime.CompilerServices;
-using System.Security.Cryptography;
 using System.Text;
 
 namespace SqlTestSupport
@@ -30,20 +26,6 @@ namespace SqlTestSupport
             }
         }
 
-        // 正規化済み SQL を返し、AST fingerprint 不一致はテスト失敗に変換する。
-        public static string NormalizeSql(string sql, string? message = null)
-        {
-            try
-            {
-                return ValidationService.Normalize(sql).NormalizedSql;
-            }
-            catch (SqlValidationException exception)
-            {
-                throw new AssertFailedException(
-                    SqlAssertMessageBuilder.Build(message, exception),
-                    exception);
-            }
-        }
     }
 
     // 低レベル例外を MSTest の失敗メッセージとして読める形に整える。
@@ -60,78 +42,44 @@ namespace SqlTestSupport
             }
 
             builder.AppendLine(exception.Message);
-            builder.AppendLine("Dialect: SQL Server 2022 / Sql160 / QUOTED_IDENTIFIER ON");
+            builder.AppendLine("方言: SQL Server 2022 / Sql160 / QUOTED_IDENTIFIER ON");
             builder.AppendLine();
 
             if (exception is SqlSyntaxValidationException syntaxException)
             {
-                builder.AppendLine("Parse errors:");
+                builder.AppendLine("構文解析エラー:");
                 foreach (var diagnostic in syntaxException.Diagnostics)
                 {
                     builder
                         .Append("  - ")
-                        .Append("Line ").Append(diagnostic.Line)
-                        .Append(", Column ").Append(diagnostic.Column)
-                        .Append(", Number ").Append(diagnostic.Number)
+                        .Append("行 ").Append(diagnostic.Line)
+                        .Append(", 列 ").Append(diagnostic.Column)
+                        .Append(", 番号 ").Append(diagnostic.Number)
                         .Append(": ")
                         .AppendLine(diagnostic.Message);
                 }
 
                 builder.AppendLine();
             }
-            else if (exception is SqlNormalizationChangedAstException changedAstException)
-            {
-                builder.AppendLine("Original fingerprint:");
-                builder.AppendLine(changedAstException.OriginalFingerprint);
-                builder.AppendLine();
-                builder.AppendLine("Normalized fingerprint:");
-                builder.AppendLine(changedAstException.NormalizedFingerprint);
-                builder.AppendLine();
-                builder.AppendLine("Normalized SQL:");
-                builder.AppendLine(changedAstException.NormalizedSql);
-                builder.AppendLine();
-            }
             else if (exception is SqlUnsupportedScriptException unsupportedException)
             {
-                builder.AppendLine("Reason:");
+                builder.AppendLine("理由:");
                 builder.AppendLine(unsupportedException.Reason);
                 builder.AppendLine();
             }
 
-            builder.AppendLine("SQL:");
+            builder.AppendLine("対象 SQL:");
             builder.AppendLine(exception.Sql);
 
             return builder.ToString();
         }
     }
 
-    // 正規化前後で AST fingerprint が変わったことを示す fail-closed 例外。
-    public sealed class SqlNormalizationChangedAstException : SqlValidationException
-    {
-        public SqlNormalizationChangedAstException(
-            string originalSql,
-            string normalizedSql,
-            string originalFingerprint,
-            string normalizedFingerprint)
-            : base("SQL normalization changed the parsed AST fingerprint.", originalSql)
-        {
-            NormalizedSql = normalizedSql;
-            OriginalFingerprint = originalFingerprint;
-            NormalizedFingerprint = normalizedFingerprint;
-        }
-
-        public string NormalizedSql { get; }
-
-        public string OriginalFingerprint { get; }
-
-        public string NormalizedFingerprint { get; }
-    }
-
     // ScriptDom が返した parse error を保持する構文検証例外。
     public sealed class SqlSyntaxValidationException : SqlValidationException
     {
         public SqlSyntaxValidationException(string sql, IReadOnlyList<SqlParseDiagnostic> diagnostics)
-            : base("SQL syntax validation failed.", sql)
+            : base("SQL の構文検証に失敗しました。", sql)
         {
             Diagnostics = diagnostics;
         }
@@ -143,7 +91,7 @@ namespace SqlTestSupport
     public sealed class SqlUnsupportedScriptException : SqlValidationException
     {
         public SqlUnsupportedScriptException(string sql, string reason)
-            : base($"SQL script is not supported by this test helper: {reason}", sql)
+            : base($"このテストヘルパーでは扱えない SQL です: {reason}", sql)
         {
             Reason = reason;
         }
@@ -165,35 +113,22 @@ namespace SqlTestSupport
 
     public sealed class SqlMockRouter
     {
-        private const UnmatchedSqlBehavior DefaultUnmatchedSqlBehavior =
-            UnmatchedSqlBehavior.ReturnNullForNullableScalarsAndValidateOnlyForCommands;
-
         private readonly SqlValidationService _validationService;
-        private readonly UnmatchedSqlBehavior _unmatchedSqlBehavior;
         private readonly List<SqlMockRule> _rules = new();
         private readonly List<SqlInvocation> _history = new();
-        private readonly Dictionary<DbCallMethod, int> _methodCallCounts = new();
-        private int _globalCallCount;
+        private int _callCount;
 
         public SqlMockRouter()
-            : this(DefaultUnmatchedSqlBehavior)
+            : this(new SqlValidationService())
         {
         }
 
-        public SqlMockRouter(UnmatchedSqlBehavior unmatchedSqlBehavior)
-            : this(new SqlValidationService(), unmatchedSqlBehavior)
-        {
-        }
-
-        public SqlMockRouter(
-            SqlValidationService validationService,
-            UnmatchedSqlBehavior unmatchedSqlBehavior = DefaultUnmatchedSqlBehavior)
+        public SqlMockRouter(SqlValidationService validationService)
         {
             _validationService = validationService;
-            _unmatchedSqlBehavior = unmatchedSqlBehavior;
         }
 
-        // 実行順や正規化後 SQL を後から検証できる履歴。
+        // 実行順や SQL 形状を後から検証できる履歴。
         public IReadOnlyList<SqlInvocation> History => _history;
 
         // SQL 形状に対する期待値を登録する。
@@ -206,67 +141,15 @@ namespace SqlTestSupport
             return new SqlMockSetup(rule);
         }
 
-        public int ExecuteNonQuery(string sql)
+        public T ExecuteResult<T>(string sql)
         {
-            // 更新系は一致 rule の affected rows を返す。
-            var invocation = CreateInvocation(DbCallMethod.ExecuteNonQuery, sql);
-            var rule = FindRule(invocation);
-            return rule.GetAffectedRows(invocation);
-        }
-
-        public void ExecuteCommand(string sql)
-        {
-            var invocation = CreateInvocation(DbCallMethod.Command, sql);
+            var invocation = CreateInvocation(sql);
             var rule = FindRuleOrDefault(invocation);
+            var value = rule is null
+                ? CreateDefaultResult<T>(invocation)
+                : rule.GetResult(invocation, () => CreateDefaultResult<T>(invocation));
 
-            if (rule is null)
-            {
-                if (AllowsUnmatchedCommand())
-                {
-                    return;
-                }
-
-                throw UnexpectedSql(invocation);
-            }
-
-            rule.Complete(invocation);
-        }
-
-        public T Scalar<T>(string sql)
-        {
-            // scalar は nullable と non-nullable で null の扱いを分ける。
-            var invocation = CreateInvocation(DbCallMethod.Scalar, sql);
-            var rule = FindRuleOrDefault(invocation);
-            var allowNull = default(T) is null;
-
-            if (rule is null)
-            {
-                if (allowNull && AllowsUnmatchedNullableScalar())
-                {
-                    return default!;
-                }
-
-                throw UnexpectedSql(invocation);
-            }
-
-            var value = rule.GetScalar(invocation, allowNull);
-
-            if (value is null)
-            {
-                if (default(T) is null)
-                {
-                    return default!;
-                }
-
-                throw new AssertFailedException($"SQL mock returned null for non-nullable scalar type {typeof(T).FullName}.");
-            }
-
-            if (value is T typed)
-            {
-                return typed;
-            }
-
-            return (T)Convert.ChangeType(value, typeof(T), System.Globalization.CultureInfo.InvariantCulture);
+            return ConvertResult<T>(value);
         }
 
         public void VerifyAll()
@@ -274,7 +157,7 @@ namespace SqlTestSupport
             // 未使用 rule はテストの期待漏れとして失敗させる。
             var failures = _rules
                 .Where(rule => rule.CallCount == 0)
-                .Select((rule, index) => $"Rule #{index + 1} was not called.")
+                .Select((_, index) => $"SQL mock rule #{index + 1} は呼び出されていません。")
                 .ToArray();
 
             if (failures.Length == 0)
@@ -285,53 +168,39 @@ namespace SqlTestSupport
             throw new AssertFailedException(string.Join(Environment.NewLine, failures));
         }
 
-        private SqlInvocation CreateInvocation(DbCallMethod method, string sql)
+        private SqlInvocation CreateInvocation(string sql)
         {
             SqlInspectionResult inspection;
             try
             {
-                // すべての Mock 実行 SQL は rule matching 前に検証・正規化。
+                // すべての Mock 実行 SQL は rule matching 前に検証・解析。
                 inspection = _validationService.Inspect(sql);
             }
             catch (SqlValidationException exception)
             {
                 throw new AssertFailedException(
-                    SqlAssertMessageBuilder.Build("SQL mock received invalid SQL.", exception),
+                    SqlAssertMessageBuilder.Build("SQL mock が不正な SQL を受け取りました。", exception),
                     exception);
             }
 
-            var methodCallIndex = _methodCallCounts.TryGetValue(method, out var count) ? count : 0;
-            _methodCallCounts[method] = methodCallIndex + 1;
-
             var invocation = new SqlInvocation(
-                method,
                 inspection.OriginalSql,
-                inspection.NormalizedSql,
-                inspection.Fingerprint,
                 inspection.StatementKind,
                 inspection.TargetTables,
                 inspection.ReferencedTables,
+                inspection.JoinedTables,
                 inspection.SelectedColumns,
                 inspection.WhereColumns,
+                inspection.OrderByColumns,
+                inspection.GroupByColumns,
+                inspection.HavingColumns,
+                inspection.HavingFunctions,
                 inspection.ParameterNames,
-                _globalCallCount++,
-                methodCallIndex);
+                _callCount++);
 
             _history.Add(invocation);
             return invocation;
         }
-
-        private SqlMockRule FindRule(SqlInvocation invocation)
-            => FindRuleOrDefault(invocation) ?? throw UnexpectedSql(invocation);
-
-        private bool AllowsUnmatchedCommand()
-            => _unmatchedSqlBehavior is
-                UnmatchedSqlBehavior.ValidateOnlyForCommands or
-                UnmatchedSqlBehavior.ReturnNullForNullableScalarsAndValidateOnlyForCommands;
-
-        private bool AllowsUnmatchedNullableScalar()
-            => _unmatchedSqlBehavior ==
-               UnmatchedSqlBehavior.ReturnNullForNullableScalarsAndValidateOnlyForCommands;
 
         private SqlMockRule? FindRuleOrDefault(SqlInvocation invocation)
         {
@@ -346,31 +215,103 @@ namespace SqlTestSupport
             return null;
         }
 
-        private AssertFailedException UnexpectedSql(SqlInvocation invocation)
+        private static object? CreateDefaultResult<T>(SqlInvocation invocation)
+        {
+            var returnType = typeof(T);
+            if (TryCreateEmptyDictionaryLike(returnType, out var dictionaryResult))
+            {
+                return dictionaryResult;
+            }
+
+            if (default(T) is null)
+            {
+                return default(T);
+            }
+
+            throw UnexpectedSql<T>(invocation);
+        }
+
+        private static bool TryCreateEmptyDictionaryLike(Type type, out object? result)
+        {
+            result = null;
+            var isDictionaryLike =
+                typeof(IDictionary).IsAssignableFrom(type) ||
+                type.GetInterfaces().Any(IsGenericDictionaryInterface);
+
+            if (!isDictionaryLike || type.IsInterface || type.IsAbstract)
+            {
+                return false;
+            }
+
+            var constructor = type.GetConstructor(Type.EmptyTypes);
+            if (constructor is null)
+            {
+                return false;
+            }
+
+            result = Activator.CreateInstance(type);
+            return true;
+        }
+
+        private static bool IsGenericDictionaryInterface(Type type)
+            => type.IsGenericType &&
+               type.GetGenericTypeDefinition() == typeof(IDictionary<,>);
+
+        private static T ConvertResult<T>(object? value)
+        {
+            if (value is null)
+            {
+                if (default(T) is null)
+                {
+                    return default!;
+                }
+
+                throw new AssertFailedException(
+                    $"SQL mock の戻り値が null です。戻り値型 {typeof(T).FullName} は null を受け取れません。");
+            }
+
+            if (value is T typed)
+            {
+                return typed;
+            }
+
+            try
+            {
+                var targetType = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
+                var converted = Convert.ChangeType(value, targetType, CultureInfo.InvariantCulture);
+                return (T)converted;
+            }
+            catch (Exception exception) when (exception is InvalidCastException or FormatException)
+            {
+                throw new AssertFailedException($"""
+                    SQL mock の戻り値型を変換できません。
+
+                    期待型:
+                    {typeof(T).FullName}
+
+                    実際型:
+                    {value.GetType().FullName}
+                    """, exception);
+            }
+        }
+
+        private static AssertFailedException UnexpectedSql<T>(SqlInvocation invocation)
         {
             var message = $"""
-                Unexpected SQL execution.
+                未登録 SQL の戻り値を決定できません。
 
-                Method:
-                {invocation.Method}
+                戻り値型:
+                {typeof(T).FullName}
 
                 Statement kind:
                 {invocation.StatementKind}
 
-                Normalized SQL:
-                {invocation.NormalizedSql}
+                対象 SQL:
+                {invocation.OriginalSql}
                 """;
 
             return new AssertFailedException(message);
         }
-    }
-
-    internal enum SqlMockReturnKind
-    {
-        None = 0,
-        AffectedRows,
-        Scalar,
-        Complete
     }
 
     // 1 つの WhenSql predicate と、それに対応する戻り値設定を保持する。
@@ -378,6 +319,7 @@ namespace SqlTestSupport
     {
         private readonly Func<SqlInvocation, bool> _predicate;
         private readonly Queue<object?> _returns = new();
+        private bool _hasConfiguredResult;
         private bool _isSequence;
         private object? _singleReturn;
 
@@ -388,91 +330,20 @@ namespace SqlTestSupport
 
         public int CallCount { get; private set; }
 
-        public SqlMockReturnKind ReturnKind { get; private set; }
-
         public bool Matches(SqlInvocation invocation)
             => _predicate(invocation);
 
-        public void SetAffectedRows(int affectedRows)
+        public void SetResult(object? value)
         {
-            ReturnKind = SqlMockReturnKind.AffectedRows;
-            _isSequence = false;
-            _singleReturn = affectedRows;
-            _returns.Clear();
-        }
-
-        public void SetAffectedRowsSequence(params int[] affectedRows)
-        {
-            ReturnKind = SqlMockReturnKind.AffectedRows;
-            SetSequence(affectedRows.Cast<object?>());
-        }
-
-        public void SetScalar(object? value)
-        {
-            ReturnKind = SqlMockReturnKind.Scalar;
+            _hasConfiguredResult = true;
             _isSequence = false;
             _singleReturn = value;
             _returns.Clear();
         }
 
-        public void SetScalarSequence(params object?[] values)
+        public void SetResultSequence(params object?[] values)
         {
-            ReturnKind = SqlMockReturnKind.Scalar;
-            SetSequence(values);
-        }
-
-        public void SetCompletes()
-        {
-            ReturnKind = SqlMockReturnKind.Complete;
-            _isSequence = false;
-            _singleReturn = null;
-            _returns.Clear();
-        }
-
-        public int GetAffectedRows(SqlInvocation invocation)
-        {
-            if (ReturnKind != SqlMockReturnKind.AffectedRows)
-            {
-                throw new AssertFailedException("Matched SQL rule does not return affected rows.");
-            }
-
-            var value = NextReturn(invocation);
-            if (value is int affectedRows)
-            {
-                return affectedRows;
-            }
-
-            throw new AssertFailedException($"Affected rows rule returned {value?.GetType().FullName ?? "null"}.");
-        }
-
-        public object? GetScalar(SqlInvocation invocation, bool allowUnconfiguredNull)
-        {
-            if (ReturnKind == SqlMockReturnKind.None && allowUnconfiguredNull)
-            {
-                CallCount++;
-                return null;
-            }
-
-            if (ReturnKind != SqlMockReturnKind.Scalar)
-            {
-                throw new AssertFailedException("Matched SQL rule does not return a scalar value.");
-            }
-
-            return NextReturn(invocation);
-        }
-
-        public void Complete(SqlInvocation invocation)
-        {
-            if (ReturnKind != SqlMockReturnKind.Complete)
-            {
-                throw new AssertFailedException("Matched SQL rule is not configured to complete a void command.");
-            }
-
-            CallCount++;
-        }
-
-        private void SetSequence(IEnumerable<object?> values)
-        {
+            _hasConfiguredResult = true;
             _isSequence = true;
             _singleReturn = null;
             _returns.Clear();
@@ -483,9 +354,14 @@ namespace SqlTestSupport
             }
         }
 
-        private object? NextReturn(SqlInvocation invocation)
+        public object? GetResult(SqlInvocation invocation, Func<object?> defaultValueFactory)
         {
             CallCount++;
+
+            if (!_hasConfiguredResult)
+            {
+                return defaultValueFactory();
+            }
 
             if (!_isSequence)
             {
@@ -496,13 +372,13 @@ namespace SqlTestSupport
             {
                 // sequence は期待回数も表す。余分な呼び出しは失敗。
                 throw new AssertFailedException($"""
-                    SQL mock sequence was exhausted.
+                    SQL mock の戻り値シーケンスを使い切りました。
 
-                    Method:
-                    {invocation.Method}
+                    呼び出し番号:
+                    {invocation.CallIndex}
 
-                    Normalized SQL:
-                    {invocation.NormalizedSql}
+                    対象 SQL:
+                    {invocation.OriginalSql}
                     """);
             }
 
@@ -520,77 +396,54 @@ namespace SqlTestSupport
             _rule = rule;
         }
 
-        public SqlMockSetup ReturnsAffectedRows(int affectedRows)
+        public SqlMockSetup ReturnsResult(object? value)
         {
-            _rule.SetAffectedRows(affectedRows);
+            _rule.SetResult(value);
             return this;
         }
 
-        public SqlMockSetup ReturnsAffectedRowsSequence(params int[] affectedRows)
+        public SqlMockSetup ReturnsResultSequence(params object?[] values)
         {
-            _rule.SetAffectedRowsSequence(affectedRows);
-            return this;
-        }
-
-        public SqlMockSetup ReturnsScalar(object? value)
-        {
-            _rule.SetScalar(value);
-            return this;
-        }
-
-        public SqlMockSetup ReturnsScalarSequence(params object?[] values)
-        {
-            _rule.SetScalarSequence(values);
-            return this;
-        }
-
-        public SqlMockSetup Completes()
-        {
-            _rule.SetCompletes();
+            _rule.SetResultSequence(values);
             return this;
         }
     }
 
-    // Mock router に到達した DB 実行メソッドの種類。
-    public enum DbCallMethod
-    {
-        ExecuteNonQuery = 0,
-        Scalar,
-        Command
-    }
-
-    // ScriptDom parse 結果と正規化ガード用 fingerprint を保持する。
+    // ScriptDom parse 結果を保持する。
     public sealed record SqlAnalysisResult(
         string OriginalSql,
-        TSqlFragment Fragment,
-        string Fingerprint);
+        TSqlFragment Fragment);
 
     // Mock 分岐に使う AST 由来の SQL metadata。
     public sealed record SqlInspectionResult(
         string OriginalSql,
-        string NormalizedSql,
-        string Fingerprint,
         SqlStatementKind StatementKind,
         IReadOnlySet<string> TargetTables,
         IReadOnlySet<string> ReferencedTables,
+        IReadOnlySet<string> JoinedTables,
         IReadOnlySet<string> SelectedColumns,
         IReadOnlySet<string> WhereColumns,
+        IReadOnlySet<string> OrderByColumns,
+        IReadOnlySet<string> GroupByColumns,
+        IReadOnlySet<string> HavingColumns,
+        IReadOnlySet<string> HavingFunctions,
         IReadOnlySet<string> ParameterNames);
 
-    // WhenSql predicate に渡す、検証・正規化・抽出済みの SQL 呼び出し情報。
+    // WhenSql predicate に渡す、検証・抽出済みの SQL 呼び出し情報。
     public sealed record SqlInvocation(
-        DbCallMethod Method,
         string OriginalSql,
-        string NormalizedSql,
-        string Fingerprint,
         SqlStatementKind StatementKind,
         IReadOnlySet<string> TargetTables,
         IReadOnlySet<string> ReferencedTables,
+        IReadOnlySet<string> JoinedTables,
         IReadOnlySet<string> SelectedColumns,
         IReadOnlySet<string> WhereColumns,
+        IReadOnlySet<string> OrderByColumns,
+        IReadOnlySet<string> GroupByColumns,
+        IReadOnlySet<string> HavingColumns,
+        IReadOnlySet<string> HavingFunctions,
         IReadOnlySet<string> ParameterNames,
-        int GlobalCallIndex,
-        int MethodCallIndex)
+        int CallIndex)
     {
         // テストコード側で SQL 形状を簡潔に表現する matcher。
         public bool IsSelectFrom(string table)
@@ -620,6 +473,21 @@ namespace SqlTestSupport
         public bool HasParameter(string parameterName)
             => ContainsIdentifier(ParameterNames, parameterName);
 
+        public bool JoinsTable(string table)
+            => ContainsIdentifier(JoinedTables, table);
+
+        public bool OrdersBy(string column)
+            => ContainsIdentifier(OrderByColumns, column);
+
+        public bool GroupsBy(string column)
+            => ContainsIdentifier(GroupByColumns, column);
+
+        public bool HavingUses(string column)
+            => ContainsIdentifier(HavingColumns, column);
+
+        public bool HavingCalls(string functionName)
+            => ContainsIdentifier(HavingFunctions, functionName);
+
         private static bool ContainsIdentifier(IReadOnlySet<string> values, string expected)
             // schema 付き・schema なしの両方を軽く許容。
             => values.Any(value =>
@@ -633,15 +501,6 @@ namespace SqlTestSupport
             return index < 0 ? value : value[(index + 1)..];
         }
     }
-
-    // 正規化前後の SQL と fingerprint 比較結果を保持する。
-    public sealed record SqlNormalizationResult(
-        string OriginalSql,
-        string NormalizedSql,
-        string OriginalFingerprint,
-        string NormalizedFingerprint,
-        SqlAnalysisResult OriginalAnalysis,
-        SqlAnalysisResult NormalizedAnalysis);
 
     // ScriptDom parse error を assertion message へ渡すための診断情報。
     public sealed record SqlParseDiagnostic(
@@ -664,173 +523,28 @@ namespace SqlTestSupport
         Multiple
     }
 
-    // WhenSql に一致しない SQL を router がどう扱うかを表す。
-    public enum UnmatchedSqlBehavior
-    {
-        Strict = 0,
-        ValidateOnlyForCommands,
-        ReturnNullForNullableScalarsAndValidateOnlyForCommands
-    }
-
-    public sealed class SqlAstFingerprinter
-    {
-        // 位置情報と token stream は整形差分で変わるため fingerprint から除外。
-        private static readonly HashSet<string> ExcludedProperties = new(StringComparer.Ordinal)
-        {
-            nameof(TSqlFragment.StartLine),
-            nameof(TSqlFragment.StartColumn),
-            nameof(TSqlFragment.StartOffset),
-            nameof(TSqlFragment.FragmentLength),
-            nameof(TSqlFragment.FirstTokenIndex),
-            nameof(TSqlFragment.LastTokenIndex),
-            nameof(TSqlFragment.ScriptTokenStream)
-        };
-
-        private static readonly ConcurrentDictionary<Type, IReadOnlyList<PropertyInfo>> FingerprintPropertiesCache = new();
-
-        public string CreateFingerprint(TSqlFragment fragment)
-        {
-            ArgumentNullException.ThrowIfNull(fragment);
-
-            var builder = new StringBuilder();
-            WriteValue(builder, fragment, new HashSet<object>(ReferenceEqualityComparer.Instance), depth: 0);
-            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString()));
-            return Convert.ToHexString(bytes);
-        }
-
-        private static void WriteValue(
-            StringBuilder builder,
-            object? value,
-            ISet<object> visited,
-            int depth)
-        {
-            if (value is null)
-            {
-                builder.Append("<null>");
-                return;
-            }
-
-            if (depth > 128)
-            {
-                builder.Append("<max-depth>");
-                return;
-            }
-
-            switch (value)
-            {
-                case string text:
-                    builder.Append('"').Append(text).Append('"');
-                    return;
-                case char character:
-                    builder.Append('\'').Append(character).Append('\'');
-                    return;
-                case bool boolean:
-                    builder.Append(boolean ? "true" : "false");
-                    return;
-                case Enum enumValue:
-                    builder.Append(value.GetType().FullName).Append('.').Append(enumValue);
-                    return;
-                case IFormattable formattable when IsScalar(value.GetType()):
-                    builder.Append(formattable.ToString(null, CultureInfo.InvariantCulture));
-                    return;
-            }
-
-            if (value is TSqlParserToken)
-            {
-                // コメント・空白・元 token への依存を避ける。
-                builder.Append("<token>");
-                return;
-            }
-
-            if (!value.GetType().IsValueType && !visited.Add(value))
-            {
-                builder.Append("<cycle>");
-                return;
-            }
-
-            if (value is IEnumerable enumerable && value is not string)
-            {
-                builder.Append('[');
-                var index = 0;
-                foreach (var item in enumerable)
-                {
-                    if (index++ > 0)
-                    {
-                        builder.Append(',');
-                    }
-
-                    WriteValue(builder, item, visited, depth + 1);
-                }
-
-                builder.Append(']');
-                return;
-            }
-
-            var type = value.GetType();
-            builder.Append(type.FullName).Append('{');
-
-            foreach (var property in GetFingerprintProperties(type))
-            {
-                builder.Append(property.Name).Append('=');
-                WriteValue(builder, property.GetValue(value), visited, depth + 1);
-                builder.Append(';');
-            }
-
-            builder.Append('}');
-        }
-
-        private static IReadOnlyList<PropertyInfo> GetFingerprintProperties(Type type)
-            => FingerprintPropertiesCache.GetOrAdd(
-                type,
-                static key => key.GetProperties(BindingFlags.Instance | BindingFlags.Public)
-                    .Where(property =>
-                        property.GetMethod is not null &&
-                        property.GetIndexParameters().Length == 0 &&
-                        !ExcludedProperties.Contains(property.Name))
-                    .OrderBy(property => property.Name, StringComparer.Ordinal)
-                    .ToArray());
-
-        private static bool IsScalar(Type type)
-        {
-            var underlying = Nullable.GetUnderlyingType(type) ?? type;
-            return underlying.IsPrimitive ||
-                   underlying == typeof(decimal) ||
-                   underlying == typeof(DateTime) ||
-                   underlying == typeof(DateTimeOffset) ||
-                   underlying == typeof(Guid);
-        }
-
-        private sealed class ReferenceEqualityComparer : IEqualityComparer<object>
-        {
-            public static readonly ReferenceEqualityComparer Instance = new();
-
-            public new bool Equals(object? x, object? y)
-                => ReferenceEquals(x, y);
-
-            public int GetHashCode(object obj)
-                => RuntimeHelpers.GetHashCode(obj);
-        }
-    }
-
     public sealed class SqlInspectionService
     {
-        public SqlInspectionResult Inspect(SqlNormalizationResult normalization)
+        public SqlInspectionResult Inspect(SqlAnalysisResult analysis)
         {
-            // 正規化済み SQL からテーブル・列・パラメータを抽出する。
-            ArgumentNullException.ThrowIfNull(normalization);
+            // 元 SQL の AST から Mock 分岐用 metadata を抽出する。
+            ArgumentNullException.ThrowIfNull(analysis);
 
             var visitor = new InspectionVisitor();
-            normalization.OriginalAnalysis.Fragment.Accept(visitor);
+            analysis.Fragment.Accept(visitor);
 
             return new SqlInspectionResult(
-                normalization.OriginalSql,
-                normalization.NormalizedSql,
-                normalization.OriginalFingerprint,
+                analysis.OriginalSql,
                 visitor.GetStatementKind(),
                 visitor.TargetTables,
                 visitor.ReferencedTables,
+                visitor.JoinedTables,
                 visitor.SelectedColumns,
                 visitor.WhereColumns,
+                visitor.OrderByColumns,
+                visitor.GroupByColumns,
+                visitor.HavingColumns,
+                visitor.HavingFunctions,
                 visitor.ParameterNames);
         }
 
@@ -838,7 +552,10 @@ namespace SqlTestSupport
         {
             None,
             Selected,
-            Where
+            Where,
+            OrderBy,
+            GroupBy,
+            Having
         }
 
         private sealed class InspectionVisitor : TSqlFragmentVisitor
@@ -850,9 +567,19 @@ namespace SqlTestSupport
 
             public IReadOnlySet<string> ReferencedTables => ReferencedTablesInternal;
 
+            public IReadOnlySet<string> JoinedTables => JoinedTablesInternal;
+
             public IReadOnlySet<string> SelectedColumns => SelectedColumnsInternal;
 
             public IReadOnlySet<string> WhereColumns => WhereColumnsInternal;
+
+            public IReadOnlySet<string> OrderByColumns => OrderByColumnsInternal;
+
+            public IReadOnlySet<string> GroupByColumns => GroupByColumnsInternal;
+
+            public IReadOnlySet<string> HavingColumns => HavingColumnsInternal;
+
+            public IReadOnlySet<string> HavingFunctions => HavingFunctionsInternal;
 
             public IReadOnlySet<string> ParameterNames => ParameterNamesInternal;
 
@@ -860,9 +587,19 @@ namespace SqlTestSupport
 
             private HashSet<string> ReferencedTablesInternal { get; } = NewIdentifierSet();
 
+            private HashSet<string> JoinedTablesInternal { get; } = NewIdentifierSet();
+
             private HashSet<string> SelectedColumnsInternal { get; } = NewIdentifierSet();
 
             private HashSet<string> WhereColumnsInternal { get; } = NewIdentifierSet();
+
+            private HashSet<string> OrderByColumnsInternal { get; } = NewIdentifierSet();
+
+            private HashSet<string> GroupByColumnsInternal { get; } = NewIdentifierSet();
+
+            private HashSet<string> HavingColumnsInternal { get; } = NewIdentifierSet();
+
+            private HashSet<string> HavingFunctionsInternal { get; } = NewIdentifierSet();
 
             private HashSet<string> ParameterNamesInternal { get; } = NewIdentifierSet();
 
@@ -964,11 +701,22 @@ namespace SqlTestSupport
                 base.ExplicitVisit(node);
             }
 
+            public override void ExplicitVisit(QualifiedJoin node)
+            {
+                AddJoinedTableReference(node.SecondTableReference);
+                base.ExplicitVisit(node);
+            }
+
+            public override void ExplicitVisit(UnqualifiedJoin node)
+            {
+                AddJoinedTableReference(node.SecondTableReference);
+                base.ExplicitVisit(node);
+            }
+
             public override void ExplicitVisit(QuerySpecification node)
             {
                 node.FromClause?.Accept(this);
 
-                // SELECT 句と WHERE 句だけ列用途を分けて収集。
                 WithColumnContext(ColumnContext.Selected, () =>
                 {
                     foreach (var selectElement in node.SelectElements)
@@ -977,14 +725,23 @@ namespace SqlTestSupport
                     }
                 });
 
-                if (node.WhereClause?.SearchCondition is not null)
+                VisitWhereClause(node.WhereClause);
+
+                if (node.GroupByClause is not null)
                 {
-                    WithColumnContext(ColumnContext.Where, () => node.WhereClause.SearchCondition.Accept(this));
+                    WithColumnContext(ColumnContext.GroupBy, () => node.GroupByClause.Accept(this));
                 }
 
-                node.GroupByClause?.Accept(this);
-                node.HavingClause?.Accept(this);
-                node.OrderByClause?.Accept(this);
+                if (node.HavingClause is not null)
+                {
+                    WithColumnContext(ColumnContext.Having, () => node.HavingClause.Accept(this));
+                }
+
+                if (node.OrderByClause is not null)
+                {
+                    WithColumnContext(ColumnContext.OrderBy, () => node.OrderByClause.Accept(this));
+                }
+
                 node.TopRowFilter?.Accept(this);
             }
 
@@ -1003,18 +760,35 @@ namespace SqlTestSupport
                     return;
                 }
 
-                if (_columnContext == ColumnContext.Selected)
+                var shortName = LastIdentifier(node.MultiPartIdentifier);
+                switch (_columnContext)
                 {
-                    SelectedColumnsInternal.Add(columnName);
+                    case ColumnContext.Selected:
+                        AddColumnName(SelectedColumnsInternal, columnName, shortName);
+                        break;
+                    case ColumnContext.Where:
+                        AddColumnName(WhereColumnsInternal, columnName, shortName);
+                        break;
+                    case ColumnContext.OrderBy:
+                        AddColumnName(OrderByColumnsInternal, columnName, shortName);
+                        break;
+                    case ColumnContext.GroupBy:
+                        AddColumnName(GroupByColumnsInternal, columnName, shortName);
+                        break;
+                    case ColumnContext.Having:
+                        AddColumnName(HavingColumnsInternal, columnName, shortName);
+                        break;
                 }
-                else if (_columnContext == ColumnContext.Where)
+
+                base.ExplicitVisit(node);
+            }
+
+            public override void ExplicitVisit(FunctionCall node)
+            {
+                if (_columnContext == ColumnContext.Having &&
+                    !string.IsNullOrWhiteSpace(node.FunctionName.Value))
                 {
-                    WhereColumnsInternal.Add(columnName);
-                    var shortName = LastIdentifier(node.MultiPartIdentifier);
-                    if (!string.IsNullOrWhiteSpace(shortName))
-                    {
-                        WhereColumnsInternal.Add(shortName);
-                    }
+                    HavingFunctionsInternal.Add(node.FunctionName.Value);
                 }
 
                 base.ExplicitVisit(node);
@@ -1063,12 +837,36 @@ namespace SqlTestSupport
                 }
             }
 
+            private void AddJoinedTableReference(TableReference? tableReference)
+            {
+                if (tableReference is null)
+                {
+                    return;
+                }
+
+                var collector = new JoinedTableCollector(JoinedTablesInternal);
+                tableReference.Accept(collector);
+            }
+
             private static void AddTableName(ISet<string> names, SchemaObjectName? schemaObjectName)
             {
                 var formatted = FormatSchemaObjectName(schemaObjectName);
                 if (!string.IsNullOrWhiteSpace(formatted))
                 {
                     names.Add(formatted);
+                }
+            }
+
+            private static void AddColumnName(ISet<string> names, string formatted, string shortName)
+            {
+                if (!string.IsNullOrWhiteSpace(formatted))
+                {
+                    names.Add(formatted);
+                }
+
+                if (!string.IsNullOrWhiteSpace(shortName))
+                {
+                    names.Add(shortName);
                 }
             }
 
@@ -1098,81 +896,31 @@ namespace SqlTestSupport
 
             private static string LastIdentifier(MultiPartIdentifier? name)
                 => name?.Identifiers.LastOrDefault()?.Value ?? string.Empty;
-        }
-    }
 
-    public sealed class SqlServer2022Normalizer
-    {
-        private readonly SqlServer2022SyntaxAnalyzer _analyzer;
-
-        public SqlServer2022Normalizer(SqlServer2022SyntaxAnalyzer? analyzer = null)
-        {
-            _analyzer = analyzer ?? new SqlServer2022SyntaxAnalyzer();
-        }
-
-        public SqlNormalizationResult Normalize(string sql)
-        {
-            var original = _analyzer.Analyze(sql);
-            var normalizedSql = Generate(original.Fragment);
-            var normalized = _analyzer.Analyze(normalizedSql);
-
-            // 正規化は fail-closed。AST 構造が変わる疑いがあれば返さない。
-            if (!StringComparer.Ordinal.Equals(original.Fingerprint, normalized.Fingerprint))
+            private sealed class JoinedTableCollector : TSqlFragmentVisitor
             {
-                throw new SqlNormalizationChangedAstException(
-                    original.OriginalSql,
-                    normalizedSql,
-                    original.Fingerprint,
-                    normalized.Fingerprint);
+                private readonly ISet<string> _names;
+
+                public JoinedTableCollector(ISet<string> names)
+                {
+                    _names = names;
+                }
+
+                public override void ExplicitVisit(NamedTableReference node)
+                {
+                    AddTableName(_names, node.SchemaObject);
+                }
             }
-
-            return new SqlNormalizationResult(
-                original.OriginalSql,
-                normalizedSql,
-                original.Fingerprint,
-                normalized.Fingerprint,
-                original,
-                normalized);
-        }
-
-        private static string Generate(TSqlFragment fragment)
-        {
-            var options = new SqlScriptGeneratorOptions
-            {
-                SqlVersion = SqlVersion.Sql160,
-                SqlEngineType = SqlEngineType.Standalone,
-                IncludeSemicolons = true,
-                KeywordCasing = KeywordCasing.Uppercase,
-                IndentationSize = 4,
-                NewLineBeforeFromClause = true,
-                NewLineBeforeWhereClause = true,
-                NewLineBeforeOrderByClause = true,
-                NewLineBeforeGroupByClause = true,
-                NewLineBeforeHavingClause = true,
-                NewLineBeforeJoinClause = true
-            };
-
-            var generator = new Sql160ScriptGenerator(options);
-            using var writer = new StringWriter(CultureInfo.InvariantCulture);
-            generator.GenerateScript(fragment, writer);
-            return writer.ToString();
         }
     }
 
     public sealed class SqlServer2022SyntaxAnalyzer
     {
-        private readonly SqlAstFingerprinter _fingerprinter;
-
-        public SqlServer2022SyntaxAnalyzer(SqlAstFingerprinter? fingerprinter = null)
-        {
-            _fingerprinter = fingerprinter ?? new SqlAstFingerprinter();
-        }
-
         public SqlAnalysisResult Analyze(string sql)
         {
             if (string.IsNullOrWhiteSpace(sql))
             {
-                throw new SqlUnsupportedScriptException(sql ?? string.Empty, "SQL text must not be empty.");
+                throw new SqlUnsupportedScriptException(sql ?? string.Empty, "SQL 文字列が空です。");
             }
 
             // SQL Server 2022 固定。QUOTED_IDENTIFIER は ON 相当。
@@ -1196,31 +944,28 @@ namespace SqlTestSupport
             if (fragment is TSqlScript script && script.Batches.Count > 1)
             {
                 // command text 実行では GO を扱わない。
-                throw new SqlUnsupportedScriptException(sql, "GO batch separators are not supported for command-text execution.");
+                throw new SqlUnsupportedScriptException(sql, "GO による複数 batch は command text として扱わないため未対応です。");
             }
 
-            return new SqlAnalysisResult(sql, fragment, _fingerprinter.CreateFingerprint(fragment));
+            return new SqlAnalysisResult(sql, fragment);
         }
     }
 
     public sealed class SqlValidationService
     {
         private readonly SqlServer2022SyntaxAnalyzer _analyzer;
-        private readonly SqlServer2022Normalizer _normalizer;
         private readonly SqlInspectionService _inspectionService;
 
         public SqlValidationService()
-            : this(null, null, null)
+            : this(null, null)
         {
         }
 
         public SqlValidationService(
             SqlServer2022SyntaxAnalyzer? analyzer,
-            SqlServer2022Normalizer? normalizer,
             SqlInspectionService? inspectionService)
         {
             _analyzer = analyzer ?? new SqlServer2022SyntaxAnalyzer();
-            _normalizer = normalizer ?? new SqlServer2022Normalizer(_analyzer);
             _inspectionService = inspectionService ?? new SqlInspectionService();
         }
 
@@ -1228,15 +973,11 @@ namespace SqlTestSupport
         public SqlAnalysisResult Analyze(string sql)
             => _analyzer.Analyze(sql);
 
-        // 表記ゆれを揃え、AST が変わらないことも確認する。
-        public SqlNormalizationResult Normalize(string sql)
-            => _normalizer.Normalize(sql);
-
-        // Mock 判定で使う形状情報まで一度に取り出す。
+        // Mock 判定で使う形状情報まで元 SQL の AST から取り出す。
         public SqlInspectionResult Inspect(string sql)
         {
-            var normalized = Normalize(sql);
-            return _inspectionService.Inspect(normalized);
+            var analysis = Analyze(sql);
+            return _inspectionService.Inspect(analysis);
         }
     }
 }

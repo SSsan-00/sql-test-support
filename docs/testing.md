@@ -10,8 +10,8 @@
 
 - SQL Server 2022 の valid T-SQL は parse できる
 - invalid T-SQL は syntax validation exception になる
-- normalization は fingerprint が一致する場合だけ SQL を返す
 - inspection は table、column、statement kind、parameter を抽出する
+- JOIN / ORDER BY / GROUP BY / HAVING の metadata を Mock 分岐に使える
 
 ## Assert facade テスト
 
@@ -20,23 +20,21 @@
 - valid SQL は facade を通過する
 - invalid SQL は `AssertFailedException` へ変換される
 - 呼び出し側の custom message は failure output に残る
-- 正規化済み SQL を呼び出し側へ返せる
+- エラー出力は日本語の見出しで parse error と対象 SQL を確認できる
 
 ## Mock router テスト
 
 保証する内容:
 
-- `WhenSql(...).ReturnsScalar(...)` は scalar call に対応する
-- nullable な scalar call は `ReturnsScalar` 省略時に `null` を返す
-- 未登録の nullable scalar call は既定で `null` を返す
-- `WhenSql(...).ReturnsAffectedRows(...)` は non-query call に対応する
-- `WhenSql(...).Completes()` は void command call に対応する
-- 未登録 void command は既定で構文解析だけ通す
-- strict mode は未登録 SQL を失敗させる
+- `WhenSql(...).ReturnsResult(...)` は一致した SQL に戻り値を返す
+- nullable な戻り値は `ReturnsResult` 省略時に `null` を返す
+- 未登録の `object?` 戻り値は既定で `null` を返す
+- 未登録の `Dictionary` 継承クラスは空インスタンスを返す
+- 未登録の `IDictionary<TKey,TValue>` 実装クラスは空インスタンスを返す
+- 未登録の非 nullable value type は失敗する
 - invalid SQL は rule matching 前に失敗する
-- void command に affected rows rule を流用すると失敗する
-- `ValidateOnlyForCommands` でも scalar / non-query の未登録 SQL は失敗する
 - sequence return は登録順に消費される
+- sequence を使い切った後の追加呼び出しは失敗する
 - 未使用 rule は `VerifyAll()` で検出される
 
 ## Mock DB 統合テスト
@@ -44,9 +42,9 @@
 integration test では、本番 DB クラスに近い最小 base class を定義します。
 
 ```csharp
-public virtual int Execute(string sql, object? parameters = null)
-public virtual T Scalar<T>(string sql, object? parameters = null)
-public virtual void ExecuteCommand(string sql, object? parameters = null)
+public virtual object? Execute(string sql, object? parameters = null)
+public virtual CustomerRows QueryRows(string sql, object? parameters = null)
+public virtual object? get_value(string columns, string table, string where)
 ```
 
-Mock subclass はこの 2 メソッドだけを override し、`SqlMockRouter` に委譲します。実 DB は不要で、導入時の使い方に近い形を検証します。
+Mock subclass は SQL 実行境界だけを override し、`SqlMockRouter` に委譲します。実 DB は不要で、導入時の使い方に近い形を検証します。

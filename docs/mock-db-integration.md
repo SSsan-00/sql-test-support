@@ -5,12 +5,12 @@
 ```csharp
 public class AppDb
 {
-    public virtual int Execute(string sql, object? parameters = null)
+    public virtual object? Execute(string sql, object? parameters = null)
     {
         // 本番DB実行
     }
 
-    public virtual T Scalar<T>(string sql, object? parameters = null)
+    public virtual CustomerRows QueryRows(string sql, object? parameters = null)
     {
         // 本番DB実行
     }
@@ -24,25 +24,20 @@ public sealed class MockAppDb : AppDb
 {
     private readonly SqlMockRouter _router = new();
 
+    public IReadOnlyList<SqlInvocation> History => _router.History;
+
     public SqlMockSetup WhenSql(Func<SqlInvocation, bool> predicate)
         => _router.WhenSql(predicate);
 
     public void VerifyAllSqlExpectations()
         => _router.VerifyAll();
 
-    public override int Execute(string sql, object? parameters = null)
-        => _router.ExecuteNonQuery(sql);
+    public override object? Execute(string sql, object? parameters = null)
+        => _router.ExecuteResult<object?>(sql);
 
-    public override T Scalar<T>(string sql, object? parameters = null)
-        => _router.Scalar<T>(sql);
+    public override CustomerRows QueryRows(string sql, object? parameters = null)
+        => _router.ExecuteResult<CustomerRows>(sql);
 }
-```
-
-戻り値なしの本番メソッドを override する場合は `ExecuteCommand` に委譲します。
-
-```csharp
-public override void Execute(string sql, object? parameters = null)
-    => _router.ExecuteCommand(sql);
 ```
 
 ## 処理フロー
@@ -51,9 +46,7 @@ Mock 経由の SQL 呼び出しは、必ず同じ流れを通ります。
 
 ```text
 SQL string
-  -> validate
-  -> normalize
-  -> AST fingerprint stability を検証
+  -> validate / parse
   -> AST metadata を抽出
   -> invocation history に記録
   -> WhenSql ルールを評価
@@ -62,64 +55,36 @@ SQL string
 
 テストメソッドからの具体的な利用パターンは [テストメソッドでの使い方](test-method-usage.md) を参照します。
 
+## ルール登録
+
 ルールは AST 由来の metadata で登録します。
 
 ```csharp
 db.WhenSql(q => q.IsSelectFrom("dbo.Customers") && q.WhereUses("Id"))
-  .ReturnsScalar("Alice");
+  .ReturnsResult("Alice");
 
-db.WhenSql(q => q.IsUpdate("dbo.Customers"))
-  .ReturnsAffectedRows(1);
+db.WhenSql(q =>
+      q.IsSelectFrom("dbo.Customers") &&
+      q.JoinsTable("dbo.Orders") &&
+      q.HavingCalls("COUNT"))
+  .ReturnsResult(new CustomerRows());
 ```
+
+同じ実行メソッドが複数回呼ばれても、SQL 形状ごとに分岐できます。複数 rule が一致し得る場合は、より具体的な rule を先に登録します。
 
 ## 既定動作
 
 router は既定で、未登録 SQL でも安全に扱える範囲だけ fallback します。
 
 - invalid SQL は matching 前に失敗する
-- 未登録の `ExecuteCommand` は validate / normalize / inspect / history 記録だけ行う
-- 未登録の nullable `Scalar<T?>` は validate / normalize / inspect / history 記録後に `null` を返す
-- 未登録の non-nullable `Scalar<T>` は失敗する
-- 未登録の `ExecuteNonQuery` は失敗する
-- `ReturnsScalar` の rule は `ExecuteNonQuery` を満たせない
-- `ReturnsAffectedRows` の rule は `Scalar<T>` を満たせない
-- `ReturnsAffectedRows` の rule は `ExecuteCommand` を満たせない
-- nullable な `Scalar<T>` は、`WhenSql` に一致する未設定 rule の場合 `null` を返せる
-- 登録済み rule に一致した戻り値なし command には `Completes` rule が必要
+- 未登録の `object?` 戻り値は validate / inspect / history 記録後に `null` を返す
+- 未登録の nullable value type は validate / inspect / history 記録後に `null` を返す
+- 未登録の reference type は validate / inspect / history 記録後に `null` を返す
+- 未登録の `Dictionary` 継承または `IDictionary<TKey,TValue>` 実装の具象クラスは空の `new()` を返す
+- 未登録の非 nullable value type は失敗する
 - 登録済み rule が一度も呼ばれない場合、`VerifyAll()` で失敗する
 
-reference type の scalar は、C# の nullable annotation を実行時に厳密判定しないため null 返却可能な型として扱います。
-
-すべての未登録 SQL を失敗させたい場合は、strict mode を明示します。
-
-```csharp
-private readonly SqlMockRouter _router =
-    new(UnmatchedSqlBehavior.Strict);
-```
-
-## command-only validate mode
-
-戻り値なし実行メソッドだけを未登録許可し、nullable scalar は未登録時に失敗させたい場合は `ValidateOnlyForCommands` を使います。
-
-```csharp
-public sealed class MockAppDb : AppDb
-{
-    private readonly SqlMockRouter _router =
-        new(UnmatchedSqlBehavior.ValidateOnlyForCommands);
-
-    public override void Execute(string sql, object? parameters = null)
-        => _router.ExecuteCommand(sql);
-}
-```
-
-この mode の挙動:
-
-- 未登録の `ExecuteCommand` SQL は validate / normalize / inspect / history 記録だけ行う
-- invalid SQL は失敗する
-- 登録済み `WhenSql(...).Completes()` に一致した SQL は通常通り rule 呼び出しとして扱う
-- `Scalar<T>` と `ExecuteNonQuery` の未登録 SQL は引き続き失敗する
-
-戻り値が必要なメソッドでは返す値を決められないため、登録必須のままにします。
+reference type は、C# の nullable annotation を実行時に厳密判定しないため null 返却可能な型として扱います。null ではテスト対象を進められない場合は `ReturnsResult` で明示値を返します。
 
 ## 複数回呼び出し
 
@@ -127,10 +92,34 @@ public sealed class MockAppDb : AppDb
 
 ```csharp
 db.WhenSql(q => q.IsSelectFrom("dbo.Customers"))
-  .ReturnsScalarSequence("Alice", "Bob");
+  .ReturnsResultSequence("Alice", "Bob");
 ```
 
 1 回目は `Alice`、2 回目は `Bob` を返します。sequence を使い切った後の追加呼び出しは失敗します。
+
+## get_value の扱い
+
+本番コードに次のようなメソッドがある場合:
+
+```csharp
+public virtual object? get_value(string columns, string table, string where)
+{
+    var sql = $"SELECT {columns} FROM {table} WHERE {where}";
+    return Execute(sql);
+}
+```
+
+`Execute(sql)` が virtual なら、Mock DB で `Execute` を override するだけで十分です。`get_value` が呼ばれると、組み立て後 SQL が virtual dispatch で Mock 側の `Execute` に入り、router が検証します。
+
+`get_value` が非 virtual 実行境界を直接呼ぶ場合は、Mock DB 側で `get_value` も override します。
+
+```csharp
+public override object? get_value(string columns, string table, string where)
+{
+    var sql = $"SELECT {columns} FROM {table} WHERE {where}";
+    return _router.ExecuteResult<object?>(sql);
+}
+```
 
 ## Matching 指針
 
@@ -145,7 +134,12 @@ q.WhereUses("Id")
 q.SelectsColumn("Name")
 q.ReferencesTable("dbo.Customers")
 q.TargetsTable("dbo.Customers")
+q.JoinsTable("dbo.Orders")
+q.OrdersBy("CreatedAt")
+q.GroupsBy("CustomerId")
+q.HavingUses("Id")
+q.HavingCalls("COUNT")
 q.HasParameter("@Id")
 ```
 
-`NormalizedSql.Contains(...)` も escape hatch として使えます。ただし標準の分岐面は AST metadata に寄せます。
+標準の分岐面は AST metadata に寄せます。SQL 文字列の部分一致は、metadata で表現しづらいケースに限定します。

@@ -4,23 +4,26 @@ namespace SqlTestSupport
 {
     public sealed class SqlInspectionService
     {
-        public SqlInspectionResult Inspect(SqlNormalizationResult normalization)
+        public SqlInspectionResult Inspect(SqlAnalysisResult analysis)
         {
-            // 正規化済み SQL からテーブル・列・パラメータを抽出する。
-            ArgumentNullException.ThrowIfNull(normalization);
+            // 元 SQL の AST から Mock 分岐用 metadata を抽出する。
+            ArgumentNullException.ThrowIfNull(analysis);
 
             var visitor = new InspectionVisitor();
-            normalization.OriginalAnalysis.Fragment.Accept(visitor);
+            analysis.Fragment.Accept(visitor);
 
             return new SqlInspectionResult(
-                normalization.OriginalSql,
-                normalization.NormalizedSql,
-                normalization.OriginalFingerprint,
+                analysis.OriginalSql,
                 visitor.GetStatementKind(),
                 visitor.TargetTables,
                 visitor.ReferencedTables,
+                visitor.JoinedTables,
                 visitor.SelectedColumns,
                 visitor.WhereColumns,
+                visitor.OrderByColumns,
+                visitor.GroupByColumns,
+                visitor.HavingColumns,
+                visitor.HavingFunctions,
                 visitor.ParameterNames);
         }
 
@@ -28,7 +31,10 @@ namespace SqlTestSupport
         {
             None,
             Selected,
-            Where
+            Where,
+            OrderBy,
+            GroupBy,
+            Having
         }
 
         private sealed class InspectionVisitor : TSqlFragmentVisitor
@@ -40,9 +46,19 @@ namespace SqlTestSupport
 
             public IReadOnlySet<string> ReferencedTables => ReferencedTablesInternal;
 
+            public IReadOnlySet<string> JoinedTables => JoinedTablesInternal;
+
             public IReadOnlySet<string> SelectedColumns => SelectedColumnsInternal;
 
             public IReadOnlySet<string> WhereColumns => WhereColumnsInternal;
+
+            public IReadOnlySet<string> OrderByColumns => OrderByColumnsInternal;
+
+            public IReadOnlySet<string> GroupByColumns => GroupByColumnsInternal;
+
+            public IReadOnlySet<string> HavingColumns => HavingColumnsInternal;
+
+            public IReadOnlySet<string> HavingFunctions => HavingFunctionsInternal;
 
             public IReadOnlySet<string> ParameterNames => ParameterNamesInternal;
 
@@ -50,9 +66,19 @@ namespace SqlTestSupport
 
             private HashSet<string> ReferencedTablesInternal { get; } = NewIdentifierSet();
 
+            private HashSet<string> JoinedTablesInternal { get; } = NewIdentifierSet();
+
             private HashSet<string> SelectedColumnsInternal { get; } = NewIdentifierSet();
 
             private HashSet<string> WhereColumnsInternal { get; } = NewIdentifierSet();
+
+            private HashSet<string> OrderByColumnsInternal { get; } = NewIdentifierSet();
+
+            private HashSet<string> GroupByColumnsInternal { get; } = NewIdentifierSet();
+
+            private HashSet<string> HavingColumnsInternal { get; } = NewIdentifierSet();
+
+            private HashSet<string> HavingFunctionsInternal { get; } = NewIdentifierSet();
 
             private HashSet<string> ParameterNamesInternal { get; } = NewIdentifierSet();
 
@@ -154,11 +180,22 @@ namespace SqlTestSupport
                 base.ExplicitVisit(node);
             }
 
+            public override void ExplicitVisit(QualifiedJoin node)
+            {
+                AddJoinedTableReference(node.SecondTableReference);
+                base.ExplicitVisit(node);
+            }
+
+            public override void ExplicitVisit(UnqualifiedJoin node)
+            {
+                AddJoinedTableReference(node.SecondTableReference);
+                base.ExplicitVisit(node);
+            }
+
             public override void ExplicitVisit(QuerySpecification node)
             {
                 node.FromClause?.Accept(this);
 
-                // SELECT 句と WHERE 句だけ列用途を分けて収集。
                 WithColumnContext(ColumnContext.Selected, () =>
                 {
                     foreach (var selectElement in node.SelectElements)
@@ -167,14 +204,23 @@ namespace SqlTestSupport
                     }
                 });
 
-                if (node.WhereClause?.SearchCondition is not null)
+                VisitWhereClause(node.WhereClause);
+
+                if (node.GroupByClause is not null)
                 {
-                    WithColumnContext(ColumnContext.Where, () => node.WhereClause.SearchCondition.Accept(this));
+                    WithColumnContext(ColumnContext.GroupBy, () => node.GroupByClause.Accept(this));
                 }
 
-                node.GroupByClause?.Accept(this);
-                node.HavingClause?.Accept(this);
-                node.OrderByClause?.Accept(this);
+                if (node.HavingClause is not null)
+                {
+                    WithColumnContext(ColumnContext.Having, () => node.HavingClause.Accept(this));
+                }
+
+                if (node.OrderByClause is not null)
+                {
+                    WithColumnContext(ColumnContext.OrderBy, () => node.OrderByClause.Accept(this));
+                }
+
                 node.TopRowFilter?.Accept(this);
             }
 
@@ -193,18 +239,35 @@ namespace SqlTestSupport
                     return;
                 }
 
-                if (_columnContext == ColumnContext.Selected)
+                var shortName = LastIdentifier(node.MultiPartIdentifier);
+                switch (_columnContext)
                 {
-                    SelectedColumnsInternal.Add(columnName);
+                    case ColumnContext.Selected:
+                        AddColumnName(SelectedColumnsInternal, columnName, shortName);
+                        break;
+                    case ColumnContext.Where:
+                        AddColumnName(WhereColumnsInternal, columnName, shortName);
+                        break;
+                    case ColumnContext.OrderBy:
+                        AddColumnName(OrderByColumnsInternal, columnName, shortName);
+                        break;
+                    case ColumnContext.GroupBy:
+                        AddColumnName(GroupByColumnsInternal, columnName, shortName);
+                        break;
+                    case ColumnContext.Having:
+                        AddColumnName(HavingColumnsInternal, columnName, shortName);
+                        break;
                 }
-                else if (_columnContext == ColumnContext.Where)
+
+                base.ExplicitVisit(node);
+            }
+
+            public override void ExplicitVisit(FunctionCall node)
+            {
+                if (_columnContext == ColumnContext.Having &&
+                    !string.IsNullOrWhiteSpace(node.FunctionName.Value))
                 {
-                    WhereColumnsInternal.Add(columnName);
-                    var shortName = LastIdentifier(node.MultiPartIdentifier);
-                    if (!string.IsNullOrWhiteSpace(shortName))
-                    {
-                        WhereColumnsInternal.Add(shortName);
-                    }
+                    HavingFunctionsInternal.Add(node.FunctionName.Value);
                 }
 
                 base.ExplicitVisit(node);
@@ -253,12 +316,36 @@ namespace SqlTestSupport
                 }
             }
 
+            private void AddJoinedTableReference(TableReference? tableReference)
+            {
+                if (tableReference is null)
+                {
+                    return;
+                }
+
+                var collector = new JoinedTableCollector(JoinedTablesInternal);
+                tableReference.Accept(collector);
+            }
+
             private static void AddTableName(ISet<string> names, SchemaObjectName? schemaObjectName)
             {
                 var formatted = FormatSchemaObjectName(schemaObjectName);
                 if (!string.IsNullOrWhiteSpace(formatted))
                 {
                     names.Add(formatted);
+                }
+            }
+
+            private static void AddColumnName(ISet<string> names, string formatted, string shortName)
+            {
+                if (!string.IsNullOrWhiteSpace(formatted))
+                {
+                    names.Add(formatted);
+                }
+
+                if (!string.IsNullOrWhiteSpace(shortName))
+                {
+                    names.Add(shortName);
                 }
             }
 
@@ -288,6 +375,21 @@ namespace SqlTestSupport
 
             private static string LastIdentifier(MultiPartIdentifier? name)
                 => name?.Identifiers.LastOrDefault()?.Value ?? string.Empty;
+
+            private sealed class JoinedTableCollector : TSqlFragmentVisitor
+            {
+                private readonly ISet<string> _names;
+
+                public JoinedTableCollector(ISet<string> names)
+                {
+                    _names = names;
+                }
+
+                public override void ExplicitVisit(NamedTableReference node)
+                {
+                    AddTableName(_names, node.SchemaObject);
+                }
+            }
         }
     }
 }

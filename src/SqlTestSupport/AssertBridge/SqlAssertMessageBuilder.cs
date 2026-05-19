@@ -16,45 +16,33 @@ namespace SqlTestSupport
             }
 
             builder.AppendLine(exception.Message);
-            builder.AppendLine("Dialect: SQL Server 2022 / Sql160 / QUOTED_IDENTIFIER ON");
+            builder.AppendLine("方言: SQL Server 2022 / Sql160 / QUOTED_IDENTIFIER ON");
             builder.AppendLine();
 
             if (exception is SqlSyntaxValidationException syntaxException)
             {
-                builder.AppendLine("Parse errors:");
+                builder.AppendLine("構文解析エラー:");
                 foreach (var diagnostic in syntaxException.Diagnostics)
                 {
                     builder
                         .Append("  - ")
-                        .Append("Line ").Append(diagnostic.Line)
-                        .Append(", Column ").Append(diagnostic.Column)
-                        .Append(", Number ").Append(diagnostic.Number)
+                        .Append("行 ").Append(diagnostic.Line)
+                        .Append(", 列 ").Append(diagnostic.Column)
+                        .Append(", 番号 ").Append(diagnostic.Number)
                         .Append(": ")
                         .AppendLine(diagnostic.Message);
                 }
 
                 builder.AppendLine();
             }
-            else if (exception is SqlNormalizationChangedAstException changedAstException)
-            {
-                builder.AppendLine("Original fingerprint:");
-                builder.AppendLine(changedAstException.OriginalFingerprint);
-                builder.AppendLine();
-                builder.AppendLine("Normalized fingerprint:");
-                builder.AppendLine(changedAstException.NormalizedFingerprint);
-                builder.AppendLine();
-                builder.AppendLine("Normalized SQL:");
-                builder.AppendLine(changedAstException.NormalizedSql);
-                builder.AppendLine();
-            }
             else if (exception is SqlUnsupportedScriptException unsupportedException)
             {
-                builder.AppendLine("Reason:");
+                builder.AppendLine("理由:");
                 builder.AppendLine(unsupportedException.Reason);
                 builder.AppendLine();
             }
 
-            builder.AppendLine("SQL:");
+            builder.AppendLine("対象 SQL:");
             builder.AppendLine(exception.Sql);
 
             return builder.ToString();

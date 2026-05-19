@@ -22,19 +22,5 @@ namespace SqlTestSupport
             }
         }
 
-        // 正規化済み SQL を返し、AST fingerprint 不一致はテスト失敗に変換する。
-        public static string NormalizeSql(string sql, string? message = null)
-        {
-            try
-            {
-                return ValidationService.Normalize(sql).NormalizedSql;
-            }
-            catch (SqlValidationException exception)
-            {
-                throw new AssertFailedException(
-                    SqlAssertMessageBuilder.Build(message, exception),
-                    exception);
-            }
-        }
     }
 }

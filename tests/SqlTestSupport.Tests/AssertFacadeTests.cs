@@ -18,24 +18,13 @@ namespace SqlTestSupport.Tests
         [TestMethod]
         public void IsValidSql_throws_assert_failed_for_invalid_sql()
         {
-            // test-facing API は低レベル例外を AssertFailedException に変換する。
+            // test-facing API は低レベル例外を日本語の AssertFailedException に変換する。
             var exception = Assert.Throws<AssertFailedException>(() =>
-                SqlAssertFacade.IsValidSql("SELECT FROM WHERE", "Custom SQL failed."));
+                SqlAssertFacade.IsValidSql("SELECT FROM WHERE", "SQL の検証に失敗しました。"));
 
-            Assert.IsTrue(exception.Message.Contains("Custom SQL failed.", StringComparison.Ordinal));
-            Assert.IsTrue(exception.Message.Contains("Parse errors:", StringComparison.Ordinal));
-        }
-
-        [TestMethod]
-        public void NormalizeSql_returns_normalized_sql()
-        {
-            // 呼び出し側は正規化済み SQL を string として受け取れる。
-            var normalized = SqlAssertFacade.NormalizeSql("""
-                select Id
-                from dbo.Customers
-                """);
-
-            Assert.IsTrue(normalized.Contains("SELECT", StringComparison.Ordinal));
+            Assert.IsTrue(exception.Message.Contains("SQL の検証に失敗しました。", StringComparison.Ordinal));
+            Assert.IsTrue(exception.Message.Contains("構文解析エラー:", StringComparison.Ordinal));
+            Assert.IsTrue(exception.Message.Contains("対象 SQL:", StringComparison.Ordinal));
         }
     }
 }

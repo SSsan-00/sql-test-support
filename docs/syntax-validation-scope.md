@@ -8,7 +8,7 @@
 
 ```text
 SQL Server 2022
-ScriptDom SqlVersion.Sql160
+TSql160Parser
 QUOTED_IDENTIFIER ON 相当
 single batch command text
 ```
@@ -78,33 +78,28 @@ EXEC(N'SELECT FROM WHERE');
 
 この場合、外側の `EXEC(...)` が T-SQL として parse できれば、内部文字列 `SELECT FROM WHERE` の文法までは検証しません。内部文字列も検証したい場合は、呼び出し側でその文字列を別途 `Assert.IsValidSql` または `SqlValidationService.Analyze` に渡します。
 
-## 正規化の安全性
-
-`NormalizeSql` と Mock router 内部の正規化は fail-closed です。
-
-```text
-original SQL
-  -> parse
-  -> original AST fingerprint
-  -> normalized SQL を生成
-  -> normalized SQL を再 parse
-  -> normalized AST fingerprint
-  -> fingerprint が一致した場合だけ返す
-```
-
-fingerprint が一致しない場合、正規化後 SQL は返しません。
-
 ## Mock 分岐 metadata の範囲
 
-構文検証は ScriptDom の parse 結果全体に対して行います。一方で、Mock 分岐用 metadata の抽出は初期版として実用範囲に絞っています。
+構文検証は ScriptDom の parse 結果全体に対して行います。一方で、Mock 分岐用 metadata の抽出はテスト分岐で使いやすい範囲に絞っています。
 
 抽出するもの:
 
 - `StatementKind`
 - `TargetTables`
 - `ReferencedTables`
+- `JoinedTables`
 - `SelectedColumns`
 - `WhereColumns`
+- `OrderByColumns`
+- `GroupByColumns`
+- `HavingColumns`
+- `HavingFunctions`
 - `ParameterNames`
 
-主に `SELECT`、`INSERT`、`UPDATE`、`DELETE`、`MERGE` の Mock 分岐を想定します。DDL や特殊な T-SQL は構文検証できても、Mock 分岐用 metadata が `Unknown` や空集合になる場合があります。その場合は `NormalizedSql.Contains(...)` を escape hatch として使うか、inspection の visitor を拡張します。
+主に `SELECT`、`INSERT`、`UPDATE`、`DELETE`、`MERGE` の Mock 分岐を想定します。DDL や特殊な T-SQL は構文検証できても、Mock 分岐用 metadata が `Unknown` や空集合になる場合があります。その場合は inspection visitor を拡張します。
+
+## 正規化を行わない理由
+
+現時点の用途では、必要なのは構文検証と Mock 分岐です。SQL Server 実行上の意味が同じかを DB 接続なしに完全保証する正規化は難しく、過剰に厳しい AST fingerprint 比較は誤検知を起こす可能性があります。
+
+そのため、ヘルパーは SQL 文字列を変更しません。Mock 分岐は元 SQL の AST metadata を使います。
