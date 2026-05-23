@@ -125,6 +125,16 @@ dist/SqlTestSupport.Directory.Build.targets
 bootstrap/SqlTestSupport.Bootstrap.cs
 ```
 
+リリース配布用に、リポジトリなしで動く単一実行ファイルも publish できます。
+
+```bash
+./bootstrap/publish-single-exe.sh osx-arm64
+./bootstrap/publish-single-exe.sh win-x64
+./bootstrap/publish-single-exe.sh linux-x64
+```
+
+生成先は既定で `artifacts/release/<RID>/` です。Windows 向けは `SqlTestSupport.Bootstrap.exe`、macOS / Linux 向けは `SqlTestSupport.Bootstrap` という単一ファイルになります。
+
 通常導入では、生成された `SqlTestSupport.cs` をテストプロジェクトへ追加します。導入先でも自己検証したい場合だけ `SqlTestSupport.Tests.cs` も追加します。
 
 .NET SDK や元リポジトリなしで生成済みソースを展開したい場合は、単一ファイル bootstrap を使えます。

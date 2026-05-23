@@ -61,6 +61,23 @@ dotnet new console --force
 dotnet run -- /path/to/test-project/SqlTestSupport
 ```
 
+リリースで配布された単一実行ファイルを使う場合:
+
+```bash
+# Windows
+SqlTestSupport.Bootstrap.exe C:\path\to\test-project\SqlTestSupport
+
+# macOS / Linux
+./SqlTestSupport.Bootstrap /path/to/test-project/SqlTestSupport
+```
+
+この実行ファイルは runtime bundle、test bundle、MSBuild targets を内包しています。導入先には `SqlTestSupport.cs`、`SqlTestSupport.Tests.cs`、`SqlTestSupport.Directory.Build.targets` が展開されます。self-test や targets が不要な場合は次の option を使えます。
+
+```bash
+./SqlTestSupport.Bootstrap /path/to/test-project/SqlTestSupport --skip-tests
+./SqlTestSupport.Bootstrap /path/to/test-project/SqlTestSupport --skip-targets
+```
+
 ## 2. 独自 Assert クラスに forwarding method を追加する
 
 テストコードからは `Assert.IsValidSql(sql)` で呼べる形にします。

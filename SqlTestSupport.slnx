@@ -7,5 +7,6 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csproj" />
+    <Project Path="tools/SqlTestSupport.ReleaseBootstrap/SqlTestSupport.ReleaseBootstrap.csproj" />
   </Folder>
 </Solution>

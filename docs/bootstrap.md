@@ -19,6 +19,8 @@ bootstrap/SqlTestSupport.Bootstrap.cs
 dist/SqlTestSupport.Directory.Build.targets
 ```
 
+さらに release 用には、`bootstrap/SqlTestSupport.Bootstrap.cs` を publish して単一実行ファイルを作れます。この実行ファイルは runtime bundle、test bundle、MSBuild targets を内包するため、利用者側に元リポジトリは不要です。
+
 `SqlTestSupport.cs` に含まれるもの:
 
 - assert facade
@@ -59,6 +61,65 @@ dotnet run --project tools/SqlTestSupport.Bootstrap/SqlTestSupport.Bootstrap.csp
 ```
 
 引数を省略すると、カレントディレクトリ配下の `dist` に展開します。
+
+### リリース用単一実行ファイルを作る場合
+
+release 配布には `bootstrap/publish-single-exe.sh` を使います。引数は `<RID> [output-dir]` です。
+
+```bash
+./bootstrap/publish-single-exe.sh osx-arm64
+./bootstrap/publish-single-exe.sh osx-x64
+./bootstrap/publish-single-exe.sh linux-x64
+./bootstrap/publish-single-exe.sh win-x64
+```
+
+`RID` を省略した場合は、実行中の OS / CPU から自動判定します。出力先を省略した場合は `artifacts/release/<RID>/` に publish します。
+
+生成される実行ファイル:
+
+```text
+artifacts/release/win-x64/SqlTestSupport.Bootstrap.exe
+artifacts/release/linux-x64/SqlTestSupport.Bootstrap
+artifacts/release/osx-arm64/SqlTestSupport.Bootstrap
+artifacts/release/osx-x64/SqlTestSupport.Bootstrap
+```
+
+内部では先に bundle を再生成し、その後 `tools/SqlTestSupport.ReleaseBootstrap/SqlTestSupport.ReleaseBootstrap.csproj` を `PublishSingleFile=true` / `SelfContained=true` で publish します。
+
+手動で publish する場合:
+
+```bash
+./bootstrap/bootstrap.sh \
+  --self-contained-script bootstrap/SqlTestSupport.expand.sh \
+  --self-contained-targets dist/SqlTestSupport.Directory.Build.targets \
+  --self-contained-csharp bootstrap/SqlTestSupport.Bootstrap.cs
+
+dotnet publish tools/SqlTestSupport.ReleaseBootstrap/SqlTestSupport.ReleaseBootstrap.csproj \
+  -c Release \
+  -r win-x64 \
+  -o artifacts/release/win-x64 \
+  --self-contained true \
+  -p:PublishSingleFile=true \
+  -p:DebugType=None \
+  -p:DebugSymbols=false
+```
+
+生成した実行ファイルを導入先で使う例:
+
+```bash
+# Windows
+SqlTestSupport.Bootstrap.exe C:\path\to\test-project\SqlTestSupport
+
+# macOS / Linux
+./SqlTestSupport.Bootstrap /path/to/test-project/SqlTestSupport
+```
+
+option は C# bootstrap と同じです。
+
+```bash
+./SqlTestSupport.Bootstrap /path/to/test-project/SqlTestSupport --skip-tests
+./SqlTestSupport.Bootstrap /path/to/test-project/SqlTestSupport --skip-targets
+```
 
 
 
@@ -138,6 +199,12 @@ SqlTestSupport.Directory.Build.targets
 
 生成ファイルは成果物です。開発は分割された source files 側で続けます。
 
+### 単一実行ファイルの project
+
+`tools/SqlTestSupport.ReleaseBootstrap/SqlTestSupport.ReleaseBootstrap.csproj` は、生成済みの `bootstrap/SqlTestSupport.Bootstrap.cs` を `Program.cs` として compile する release 専用 project です。
+
+通常の bundle 生成には `tools/SqlTestSupport.Bootstrap` を使います。release 配布物を作るときだけ `tools/SqlTestSupport.ReleaseBootstrap` を publish します。
+
 ### ビルド時自動展開 targets
 
 `--self-contained-targets <path>` を指定すると、runtime bundle と test bundle を base64 として埋め込んだ MSBuild targets file を出力します。
@@ -191,3 +258,16 @@ SqlTestSupport.Directory.Build.targets
 2. 導入先プロジェクトで通常どおり `dotnet build` または `dotnet test` を実行する
 3. ビルド後、必要に応じて `obj/SqlTestSupport/SqlTestSupport.cs` の展開結果を確認する
 4. 導入先に既存の `Directory.Build.targets` がある場合は、上書きせず `SqlTestSupport.Directory.Build.targets` としてコピーし、既存 `Directory.Build.targets` から `<Import Project="SqlTestSupport.Directory.Build.targets" />` で読み込む
+
+### C. 単一実行ファイルから展開する場合
+
+1. release asset の `SqlTestSupport.Bootstrap.exe` または `SqlTestSupport.Bootstrap` を取得する
+2. 導入先ディレクトリを指定して実行する
+
+   ```bash
+   ./SqlTestSupport.Bootstrap /path/to/test-project/SqlTestSupport
+   ```
+
+3. 生成された `SqlTestSupport.cs` をテストプロジェクトへ追加する
+4. 導入先で自己検証したい場合は `SqlTestSupport.Tests.cs` も追加する
+5. ビルド時自動展開を使う場合は `SqlTestSupport.Directory.Build.targets` を導入先テストプロジェクトの `Directory.Build.targets` として配置する
